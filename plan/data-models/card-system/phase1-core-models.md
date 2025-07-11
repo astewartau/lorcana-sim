@@ -56,16 +56,33 @@ class Card:
     story: str                 # From "story" field
     
     # Abilities & Text
-    abilities: List[Ability]   # Parsed from "abilities" array
-    flavor_text: Optional[str] # From "flavorText" field
-    full_text: str             # From "fullText" field
+    abilities: List[Ability] = field(default_factory=list)   # Parsed from "abilities" array
+    flavor_text: Optional[str] = None # From "flavorText" field
+    full_text: str = ""        # From "fullText" field
     
     # Visual (optional for simulation)
-    artists: List[str]         # From "artists" array
+    artists: List[str] = field(default_factory=list)         # From "artists" array
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate card data after creation"""
-        # Add validation logic here
+        if self.cost < 0:
+            raise ValueError(f"Card cost cannot be negative: {self.cost}")
+        if not self.name:
+            raise ValueError("Card name cannot be empty")
+        if not self.full_name:
+            self.full_name = f"{self.name} - {self.version}" if self.version else self.name
+    
+    @property
+    def card_type(self) -> str:
+        """Get the card type (implemented by subclasses)"""
+        class_name = self.__class__.__name__
+        if class_name == "Card":
+            return "Card"
+        return class_name.replace("Card", "")
+    
+    def can_be_inked(self) -> bool:
+        """Check if this card can be played as ink"""
+        return self.inkwell
 ```
 
 **Key Enums:**
@@ -104,17 +121,27 @@ Implement the four main card types with their unique properties.
 class CharacterCard(Card):
     """Represents a character card"""
     # Combat Stats (from JSON)
-    strength: int              # From "strength" field
-    willpower: int             # From "willpower" field
-    lore: int                  # From "lore" field
+    strength: int = 0          # From "strength" field
+    willpower: int = 0         # From "willpower" field
+    lore: int = 0              # From "lore" field
     
     # Character Classification
-    subtypes: List[str]        # From "subtypes" array (if present)
+    subtypes: List[str] = field(default_factory=list)  # From "subtypes" array
     
     # Runtime State (not from JSON - game state)
     damage: int = 0            # Current damage taken
     exerted: bool = False      # Whether character is exerted
     location: Optional[str] = None  # Current location (if any)
+    
+    def __post_init__(self) -> None:
+        """Validate character card data after creation"""
+        super().__post_init__()
+        if self.strength < 0:
+            raise ValueError(f"Character strength cannot be negative: {self.strength}")
+        if self.willpower < 0:
+            raise ValueError(f"Character willpower cannot be negative: {self.willpower}")
+        if self.lore < 0:
+            raise ValueError(f"Character lore cannot be negative: {self.lore}")
     
     @property
     def is_alive(self) -> bool:
@@ -124,8 +151,47 @@ class CharacterCard(Card):
     @property
     def current_strength(self) -> int:
         """Get current strength (may be modified by abilities)"""
-        # TODO: Apply ability modifiers
         return self.strength
+    
+    @property
+    def current_willpower(self) -> int:
+        """Get current willpower (may be modified by abilities)"""
+        return self.willpower
+    
+    @property
+    def current_lore(self) -> int:
+        """Get current lore value (may be modified by abilities)"""
+        return self.lore
+    
+    def deal_damage(self, amount: int) -> None:
+        """Deal damage to this character"""
+        if amount < 0:
+            raise ValueError("Damage amount cannot be negative")
+        self.damage += amount
+    
+    def exert(self) -> None:
+        """Exert this character"""
+        self.exerted = True
+    
+    def ready(self) -> None:
+        """Ready this character"""
+        self.exerted = False
+    
+    def can_quest(self) -> bool:
+        """Check if this character can quest"""
+        return not self.exerted and self.is_alive
+    
+    def has_subtype(self, subtype: str) -> bool:
+        """Check if this character has a specific subtype"""
+        return subtype in self.subtypes
+    
+    def get_origin_type(self) -> Optional[str]:
+        """Get the origin type (Storyborn, Dreamborn, Floodborn)"""
+        origin_types = {"Storyborn", "Dreamborn", "Floodborn"}
+        for subtype in self.subtypes:
+            if subtype in origin_types:
+                return subtype
+        return None
 ```
 
 **Action Cards:**
@@ -133,23 +199,51 @@ class CharacterCard(Card):
 @dataclass 
 class ActionCard(Card):
     """Represents an action card (includes songs)"""
-    # Action effects
-    effects: List[str]         # From "effects" array in JSON
+    # Action effects (derived from abilities)
+    effects: List[str] = field(default_factory=list)
     
-    # Song detection (derived from abilities)
     @property
     def is_song(self) -> bool:
         """Check if this action is a song (has singer cost reduction)"""
-        # Check abilities for singer cost text
-        return any("sing this song" in ability.effect.lower() 
-                  for ability in self.abilities)
+        for ability in self.abilities:
+            if "sing this song" in ability.effect.lower():
+                return True
+        return False
     
     @property
     def singer_cost_reduction(self) -> Optional[int]:
         """Get the cost reduction for singers (if this is a song)"""
+        if not self.is_song:
+            return None
+        
         # Parse from ability text like "cost 2 or more can sing..."
-        # TODO: Implement parsing logic
+        for ability in self.abilities:
+            effect_text = ability.effect.lower()
+            if "cost" in effect_text and "sing" in effect_text:
+                words = effect_text.split()
+                for i, word in enumerate(words):
+                    if word == "cost" and i + 1 < len(words):
+                        try:
+                            return int(words[i + 1])
+                        except ValueError:
+                            continue
         return None
+    
+    def can_be_sung_by_character(self, character_strength: int) -> bool:
+        """Check if a character with given strength can sing this song"""
+        if not self.is_song:
+            return False
+        required_strength = self.singer_cost_reduction
+        if required_strength is None:
+            return False
+        return character_strength >= required_strength
+    
+    def get_effective_cost(self, is_being_sung: bool = False) -> int:
+        """Get the effective cost to play this action"""
+        if is_being_sung and self.is_song:
+            reduction = self.singer_cost_reduction or 0
+            return max(0, self.cost - reduction)
+        return self.cost
 ```
 
 **Item Cards:**
@@ -157,17 +251,37 @@ class ActionCard(Card):
 @dataclass
 class ItemCard(Card):
     """Represents an item card"""
-    # Items typically have ongoing effects or single-use effects
-    # No special stats beyond base card properties
-    
     # Runtime State
     attached_to: Optional[str] = None  # Character this is attached to (if any)
     
     @property
     def is_permanent(self) -> bool:
         """Check if item stays in play (vs single-use)"""
-        # TODO: Determine from ability text
-        return True  # Default assumption
+        # Determine from ability text - items with ongoing effects typically stay in play
+        for ability in self.abilities:
+            effect_text = ability.effect.lower()
+            if any(keyword in effect_text for keyword in ["while", "as long as", "whenever", "during"]):
+                return True
+        return True  # Default to permanent
+    
+    @property
+    def is_attachment(self) -> bool:
+        """Check if this item attaches to characters"""
+        for ability in self.abilities:
+            effect_text = ability.effect.lower()
+            if any(keyword in effect_text for keyword in ["attach", "equipped", "bearer"]):
+                return True
+        return False
+    
+    def attach_to_character(self, character_name: str) -> None:
+        """Attach this item to a character"""
+        if not self.is_attachment:
+            raise ValueError(f"Item {self.full_name} cannot be attached to characters")
+        self.attached_to = character_name
+    
+    def is_attached(self) -> bool:
+        """Check if this item is currently attached to a character"""
+        return self.attached_to is not None
 ```
 
 **Location Cards:**
@@ -176,18 +290,51 @@ class ItemCard(Card):
 class LocationCard(Card):
     """Represents a location card"""
     # Location Properties (from JSON)
-    move_cost: int             # From "moveCost" field
-    willpower: int             # From "willpower" field  
+    move_cost: int = 0         # From "moveCost" field
+    willpower: int = 0         # From "willpower" field  
     lore: Optional[int] = None # From "lore" field (some locations provide lore)
     
     # Runtime State
     damage: int = 0            # Current damage to location
-    characters: List[str] = field(default_factory=list)  # Characters at this location
+    characters: List[str] = field(default_factory=list)  # Character names at this location
+    
+    def __post_init__(self) -> None:
+        """Validate location card data after creation"""
+        super().__post_init__()
+        if self.move_cost < 0:
+            raise ValueError(f"Location move cost cannot be negative: {self.move_cost}")
+        if self.willpower < 0:
+            raise ValueError(f"Location willpower cannot be negative: {self.willpower}")
     
     @property
     def is_destroyed(self) -> bool:
         """Check if location is destroyed (damage >= willpower)"""
         return self.damage >= self.willpower
+    
+    @property
+    def provides_lore(self) -> bool:
+        """Check if this location provides lore when quested at"""
+        return self.lore is not None and self.lore > 0
+    
+    def deal_damage(self, amount: int) -> None:
+        """Deal damage to this location"""
+        if amount < 0:
+            raise ValueError("Damage amount cannot be negative")
+        self.damage += amount
+    
+    def add_character(self, character_name: str) -> None:
+        """Add a character to this location"""
+        if character_name not in self.characters:
+            self.characters.append(character_name)
+    
+    def remove_character(self, character_name: str) -> None:
+        """Remove a character from this location"""
+        if character_name in self.characters:
+            self.characters.remove(character_name)
+    
+    def can_move_character_here(self, player_available_ink: int) -> bool:
+        """Check if a player can afford to move a character here"""
+        return player_available_ink >= self.move_cost
 ```
 
 #### A3: Card Factory and Loading
@@ -223,13 +370,25 @@ class CardFactory:
     @staticmethod
     def _parse_common_fields(card_data: dict) -> dict:
         """Parse fields common to all card types"""
+        # Handle color - could be single color or multi-color like "Amber-Steel"
+        color_str = card_data.get("color", "")
+        try:
+            color = CardColor(color_str)
+        except ValueError:
+            # Handle multi-color cards by taking the first color for now
+            if "-" in color_str:
+                first_color = color_str.split("-")[0]
+                color = CardColor(first_color)
+            else:
+                raise ValueError(f"Unknown card color: {color_str}")
+        
         return {
             'id': card_data['id'],
             'name': card_data['name'],
             'version': card_data.get('version'),
             'full_name': card_data['fullName'],
             'cost': card_data['cost'],
-            'color': CardColor(card_data['color']),
+            'color': color,
             'inkwell': card_data['inkwell'],
             'rarity': Rarity(card_data['rarity']),
             'set_code': card_data['setCode'],
@@ -237,9 +396,99 @@ class CardFactory:
             'story': card_data['story'],
             'abilities': CardFactory._parse_abilities(card_data.get('abilities', [])),
             'flavor_text': card_data.get('flavorText'),
-            'full_text': card_data['fullText'],
+            'full_text': card_data.get('fullText', ''),
             'artists': card_data.get('artists', [])
         }
+    
+    @staticmethod
+    def _parse_character_fields(card_data: dict) -> dict:
+        """Parse fields specific to character cards"""
+        return {
+            'strength': card_data.get('strength', 0),
+            'willpower': card_data.get('willpower', 0),
+            'lore': card_data.get('lore', 0),
+            'subtypes': card_data.get('subtypes', [])
+        }
+    
+    @staticmethod
+    def _parse_action_fields(card_data: dict) -> dict:
+        """Parse fields specific to action cards"""
+        # Extract effects from abilities
+        effects = []
+        for ability in card_data.get('abilities', []):
+            if ability.get('effect'):
+                effects.append(ability['effect'])
+        return {'effects': effects}
+    
+    @staticmethod
+    def _parse_item_fields(card_data: dict) -> dict:
+        """Parse fields specific to item cards"""
+        return {}  # Items don't have special fields beyond the base card
+    
+    @staticmethod
+    def _parse_location_fields(card_data: dict) -> dict:
+        """Parse fields specific to location cards"""
+        return {
+            'move_cost': card_data.get('moveCost', 0),
+            'willpower': card_data.get('willpower', 0),
+            'lore': card_data.get('lore')  # Can be None
+        }
+    
+    @staticmethod
+    def _parse_abilities(abilities_data: List[dict]) -> List[Ability]:
+        """Parse abilities from JSON structure"""
+        abilities = []
+        
+        for ability_data in abilities_data:
+            ability_type_str = ability_data.get('type', '')
+            name = ability_data.get('name', '')
+            effect = ability_data.get('effect', '')
+            full_text = ability_data.get('fullText', effect)
+            
+            if ability_type_str == 'keyword':
+                keyword = ability_data.get('keyword', '')
+                value = ability_data.get('value')  # For abilities like "Singer 5"
+                abilities.append(KeywordAbility(
+                    name=name,
+                    type=AbilityType.KEYWORD,
+                    effect=effect,
+                    full_text=full_text,
+                    keyword=keyword,
+                    value=value
+                ))
+            elif ability_type_str == 'triggered':
+                abilities.append(TriggeredAbility(
+                    name=name,
+                    type=AbilityType.TRIGGERED,
+                    effect=effect,
+                    full_text=full_text,
+                    trigger_condition=effect  # Store as string for now
+                ))
+            elif ability_type_str == 'static':
+                abilities.append(StaticAbility(
+                    name=name,
+                    type=AbilityType.STATIC,
+                    effect=effect,
+                    full_text=full_text
+                ))
+            elif ability_type_str == 'activated':
+                abilities.append(ActivatedAbility(
+                    name=name,
+                    type=AbilityType.ACTIVATED,
+                    effect=effect,
+                    full_text=full_text,
+                    costs=[]  # TODO: Parse costs from text
+                ))
+            else:
+                # Create a generic ability for unknown types
+                abilities.append(Ability(
+                    name=name,
+                    type=AbilityType.STATIC,  # Default fallback
+                    effect=effect,
+                    full_text=full_text
+                ))
+        
+        return abilities
 ```
 
 ### Part B: Ability System Foundation
