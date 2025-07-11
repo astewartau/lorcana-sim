@@ -4,13 +4,13 @@ A comprehensive Python-based simulation of the Lorcana Trading Card Game.
 
 ## Features
 
-### Phase 1: Core Data Models ✅
-- **Card Models**: Character, Action, Item, Location cards with full property support
-- **Ability System**: Keyword, Triggered, Static, and Activated abilities
-- **Deck Building**: Legal deck validation, shuffling, and analysis
-- **Player State**: Hand, deck, inkwell, and character management
-- **Game State**: Turn structure, phase management, and legal action validation
-- **JSON Parsing**: Full lorcana-json format support with robust error handling
+### Phase 1: Core Data Models ⚠️ 
+- **Card Models**: ✅ Character, Action, Item, Location cards with full property support
+- **Ability System**: ⚠️ Foundation and parsing implemented, execution system incomplete
+- **Deck Building**: ✅ Legal deck validation, shuffling, and analysis
+- **Player State**: ✅ Hand, deck, inkwell, and character management
+- **Game State**: ✅ Turn structure, phase management, and legal action validation
+- **JSON Parsing**: ⚠️ Full lorcana-json format support, missing keywordAbilities array
 
 ### Advanced Deck Building ✅
 - **Smart Deck Builder**: Generates legal decks with various strategies
@@ -139,9 +139,17 @@ The system works with the [lorcana-json](https://github.com/hexastorm/lorcana-js
 
 ## Development Status
 
-- ✅ **Phase 1**: Core Data Models and Deck Building
-- 🔄 **Phase 2**: Advanced Ability System (Planned)
-- 🔄 **Phase 3**: Complete Game Rules Engine (Planned)  
+- ⚠️ **Phase 1**: Core Data Models and Deck Building (Foundation complete, abilities need work)
+- 🔄 **Phase 1.5**: Complete Ability System (keywordAbilities parsing, execution engine)
+- 🔄 **Phase 2**: Complete Game Rules Engine (Planned)
+- 🔄 **Phase 3**: Advanced Ability Interactions (Planned)  
 - 🔄 **Phase 4**: AI Players and Simulation (Planned)
+
+### Abilities System Status
+- ✅ **Structure**: Ability classes and type hierarchy
+- ✅ **Basic Parsing**: `abilities` JSON array → Ability objects  
+- ❌ **Keyword Parsing**: `keywordAbilities` array ignored
+- ❌ **Execution**: Abilities parsed but don't affect gameplay
+- ❌ **Event System**: No triggers for "when played", "when challenged", etc.
 
 See `plan/` directory for detailed implementation roadmap.
