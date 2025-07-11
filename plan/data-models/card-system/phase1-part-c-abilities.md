@@ -1,14 +1,20 @@
-# Phase 1 Part B: Ability System Foundation
+# Phase 1 Part C: Ability System Foundation
 
 ## Overview
 
 **Critical Understanding**: The lorcana-json format provides human-readable ability descriptions (e.g., "This character can't ⟳ to sing songs") but no machine-executable logic. We must implement all ability behaviors ourselves.
 
-**Current Status After Part A**:
+**Current Status After Parts A & B**:
 - ✅ Ability structure and parsing from `abilities` JSON array  
-- ❌ `keywordAbilities` array parsing (strings like `["Singer", "Evasive"]`)
-- ❌ Ability execution (abilities are data objects only)
+- ✅ `keywordAbilities` array parsing (599 keyword instances now parsed)
+- ✅ Keyword registry system with factory pattern
+- ✅ 3/14 keyword abilities implemented (Singer, Evasive, Bodyguard)
+- ❌ Remaining 11 keyword abilities
+- ❌ Game state integration for ability execution
 - ❌ Event system for triggered abilities
+- ❌ Named ability pattern matching system
+
+**Dependencies**: Part B (Game State Foundation) must be complete before meaningful ability execution can be implemented.
 
 **Scope Analysis**:
 - **14 unique keywords**: Singer, Evasive, Bodyguard, Shift, Ward, Rush, Resist, Challenger, Support, Sing Together, Reckless, Vanish, Puppy Shift, Universal Shift
@@ -17,7 +23,7 @@
 
 ## Implementation Plan
 
-### B1: Fix keywordAbilities Parsing Gap 🔥 HIGH PRIORITY
+### C1: Fix keywordAbilities Parsing Gap ✅ COMPLETED
 
 **Current Issue**: CardFactory only parses the `abilities` JSON array but ignores the `keywordAbilities` array.
 
@@ -75,7 +81,7 @@ def _parse_abilities(card_data: Dict[str, Any]) -> List[Ability]:
     return abilities
 ```
 
-### B2: Ability Enumeration and Analysis Tools 🔥 HIGH PRIORITY
+### C2: Ability Enumeration and Analysis Tools ✅ COMPLETED
 
 Enhance existing enumeration to create comprehensive ability catalogs.
 
@@ -223,7 +229,7 @@ class AbilityAnalyzer:
         }
 ```
 
-### B3: Keyword Ability Implementations 🔥 HIGH PRIORITY
+### C3: Keyword Ability Implementations 🔄 IN PROGRESS (3/14 Complete)
 
 Implement the 14 keyword abilities with actual game logic.
 
@@ -360,7 +366,7 @@ class EvasiveAbility(KeywordAbility):
         pass
 ```
 
-### B4: Ability Execution Engine 🔥 HIGH PRIORITY
+### C4: Ability Execution Engine ⏸️ BLOCKED (Requires Part B Game State)
 
 Build the framework to actually execute abilities during gameplay.
 
@@ -525,7 +531,7 @@ class AbilityEngine:
         return total_modifier
 ```
 
-### B5: Named Ability Framework (Medium Priority)
+### C5: Named Ability Framework ⏸️ BLOCKED (Requires Part B & C4)
 
 Create a pattern-based system for the 1190+ unique named abilities.
 
@@ -587,7 +593,7 @@ class AbilityPatternMatcher:
         return unknown
 ```
 
-### B6: Testing Framework (Medium Priority)
+### C6: Testing Framework ⏸️ BLOCKED (Requires C4 & C5)
 
 **Files to Create:**
 - `tests/test_ability_parsing.py`
@@ -596,31 +602,31 @@ class AbilityPatternMatcher:
 
 ## Implementation Priority
 
-### Phase 1 (High Priority - Make abilities functional):
-1. **B1: Fix keywordAbilities parsing** - Foundation requirement
-2. **B3: Core keyword implementations** - Singer, Evasive, Bodyguard (most common)
-3. **B4: Basic execution engine** - Events and ability triggering
-4. **B2: Enhanced enumeration** - Understand what we're building
+### Phase 1 (Completed):
+1. ✅ **C1: Fix keywordAbilities parsing** - Foundation requirement
+2. ✅ **C2: Enhanced enumeration** - Understand what we're building
+3. ✅ **C3: Core keyword implementations** - Singer, Evasive, Bodyguard (3/14 complete)
 
-### Phase 2 (Medium Priority - Expand functionality):
-5. **B3: Remaining keyword implementations** - All 14 keywords working
-6. **B5: Named ability patterns** - Handle common named abilities
-7. **B6: Testing framework** - Ensure correctness
+### Phase 2 (Blocked - Requires Part B Game State):
+4. **Part B: Game State Foundation** - Turn tracking, move validation, game rules
+5. **C4: Basic execution engine** - Events and ability triggering
+6. **C3: Remaining keyword implementations** - Complete all 14 keywords
 
-### Phase 3 (Lower Priority - Polish):
-8. **Advanced pattern matching** - Handle complex named abilities
-9. **Performance optimization** - Efficient ability checking
-10. **Complex interactions** - Replacement effects, timing rules
+### Phase 3 (Future - After Part B & C4):
+7. **C5: Named ability patterns** - Handle common named abilities  
+8. **C6: Testing framework** - Comprehensive ability testing
+9. **Advanced pattern matching** - Handle complex named abilities
+10. **Performance optimization** - Efficient ability checking
 
 ## Success Criteria
 
-After Part B completion:
+After Part C completion:
 - ✅ All 14 keywords parsed and functional
-- ✅ Singer reduces song costs in actual gameplay
+- ✅ Singer reduces song costs in actual gameplay  
 - ✅ Evasive prevents non-evasive challenges
 - ✅ Bodyguard forces proper challenge targeting
 - ✅ Basic triggered abilities work (when played, when challenged)
 - ✅ Most common named abilities have implementations
-- ✅ Abilities actually affect game state, not just decorative
+- ✅ Abilities actually affect game state through Part B's game engine
 
-This transforms abilities from "decorative data" into "functional game mechanics."
+This transforms abilities from "decorative data" into "functional game mechanics" that integrate with the game state foundation from Part B.

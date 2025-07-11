@@ -491,65 +491,46 @@ class CardFactory:
         return abilities
 ```
 
-### Part B: Ability System Foundation
+### Part B: Game State Foundation
 
-#### B1: Basic Ability Classes
-Start with a simple ability system that can be expanded later.
+#### B1: Core Game State Model
+Implement the fundamental game state structure needed for ability execution and move validation.
 
 **Files to Create:**
-- `src/models/abilities/base_ability.py`
-- `src/models/abilities/__init__.py`
+- `src/lorcana_sim/models/game/game_state.py`
+- `src/lorcana_sim/models/game/phase.py`
+- `src/lorcana_sim/engine/move_validator.py`
+- `src/lorcana_sim/engine/game_engine.py`
 
-**Initial Implementation:**
-```python
-@dataclass
-class Ability:
-    """Base class for all card abilities"""
-    name: str                  # From "name" field in JSON
-    type: AbilityType          # From "type" field
-    effect: str                # From "effect" field
-    full_text: str             # From "fullText" field
-    
-    def can_activate(self, game_state: 'GameState') -> bool:
-        """Check if this ability can be activated (override in subclasses)"""
-        return False
-    
-    def execute(self, game_state: 'GameState', targets: List['Target']) -> None:
-        """Execute this ability (override in subclasses)"""
-        raise NotImplementedError("Ability execution not implemented")
+**Purpose**: Create the game state management system that tracks turn progression, player resources, card zones, and provides move validation. This foundation is required before implementing ability execution in Part C.
 
-class AbilityType(Enum):
-    KEYWORD = "keyword"
-    TRIGGERED = "triggered" 
-    STATIC = "static"
-    ACTIVATED = "activated"
+**Key Components:**
+- Game state tracking (turn number, phase, active player)
+- Player resource management (lore, ink, zones)
+- Move validation system (legal actions, challenge rules)
+- Basic game rules engine (action execution, state transitions)
 
-# Simple subclasses for now
-@dataclass
-class KeywordAbility(Ability):
-    """Keyword abilities like Shift, Evasive, etc."""
-    keyword: str
-    value: Optional[int] = None  # For abilities like "Singer 5"
+**Status**: Not implemented - required before Part C abilities can function properly.
 
-@dataclass
-class StaticAbility(Ability):
-    """Always-active abilities"""
-    pass
+### Part C: Ability System Foundation
 
-@dataclass
-class TriggeredAbility(Ability):
-    """Abilities that trigger on events"""
-    trigger_condition: str  # TODO: Make this more structured later
+#### C1: Basic Ability Classes
+Expand the ability system to support functional game mechanics.
 
-@dataclass
-class ActivatedAbility(Ability):
-    """Abilities that require activation and costs"""
-    costs: List[str] = field(default_factory=list)  # TODO: Structure this later
-```
+**Files to Create/Enhance:**
+- `src/lorcana_sim/models/abilities/base_ability.py`
+- `src/lorcana_sim/abilities/keywords/` (keyword implementations)
+- `src/lorcana_sim/engine/ability_engine.py`
 
-### Part C: Game Structure Objects
+**Purpose**: Transform abilities from "decorative data" into "functional game mechanics" that actually affect gameplay.
 
-#### C1: Deck Model
+**Dependencies**: Requires Part B (Game State) to be complete for meaningful ability execution.
+
+**Status**: Partially implemented - keyword parsing and 3/14 keyword abilities complete (Singer, Evasive, Bodyguard).
+
+### Part D: Advanced Game Objects
+
+#### D1: Deck Model
 Represent a collection of cards that follows Lorcana deck building rules.
 
 **Files to Create:**
@@ -610,7 +591,7 @@ class Deck:
         pass
 ```
 
-#### C2: Player Model
+#### D2: Player Model
 Represent a player's state and resources during a game.
 
 **Files to Create:**
@@ -673,7 +654,7 @@ class Player:
         return False
 ```
 
-#### C3: Game State Model
+#### D3: Game State Model
 Represent the overall state of a game in progress.
 
 **Files to Create:**

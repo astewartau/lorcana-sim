@@ -124,20 +124,20 @@ def test_character_exert_ready():
     
     # Initially ready
     assert card.exerted is False
-    assert card.can_quest() is True
-    assert card.can_challenge() is True
+    assert card.can_quest(1) is True
+    assert card.can_challenge(1) is True
     
     # Exert the character
     card.exert()
     assert card.exerted is True
-    assert card.can_quest() is False
-    assert card.can_challenge() is False
+    assert card.can_quest(1) is False
+    assert card.can_challenge(1) is False
     
     # Ready the character
     card.ready()
     assert card.exerted is False
-    assert card.can_quest() is True
-    assert card.can_challenge() is True
+    assert card.can_quest(1) is True
+    assert card.can_challenge(1) is True
 
 
 def test_character_subtypes():

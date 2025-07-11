@@ -108,8 +108,8 @@ def test_character_cards_have_combat_stats(card_database):
             assert card.lore >= 0
             
             # Should be able to perform character actions
-            assert card.can_quest() is True  # Initially ready
-            assert card.can_challenge() is True  # Initially ready
+            assert card.can_quest(1) is True  # Initially ready
+            assert card.can_challenge(1) is True  # Initially ready
             assert card.is_alive is True  # No initial damage
             
         except Exception as e:
@@ -183,16 +183,18 @@ def test_create_simple_game(sample_cards):
     game = GameState(players=[player1, player2])
     
     assert len(game.players) == 2
-    assert game.active_player == player1
+    assert game.current_player == player1
     assert game.turn_number == 1
     assert not game.game_over
     
-    # Test basic game operations
-    legal_actions = game.get_legal_actions()
+    # Test basic game operations with the new engine
+    from src.lorcana_sim.engine.move_validator import MoveValidator
+    validator = MoveValidator(game)
+    legal_actions = validator.get_all_legal_actions()
     assert len(legal_actions) > 0
     
-    # Should be able to pass turn
-    pass_actions = [action for action in legal_actions if action[0].value == "pass_phase"]
+    # Should be able to pass turn  
+    pass_actions = [action for action in legal_actions if action[0].value == "pass_turn"]
     assert len(pass_actions) > 0
 
 
