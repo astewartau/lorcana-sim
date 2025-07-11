@@ -1,0 +1,69 @@
+Metadata-Version: 2.4
+Name: lorcana-sim
+Version: 0.1.0
+Summary: A comprehensive Python-based simulation of the Lorcana Trading Card Game
+Author-email: Ashley <ashley@example.com>
+License: MIT
+Project-URL: Homepage, https://github.com/ashley/lorcana-sim
+Project-URL: Repository, https://github.com/ashley/lorcana-sim
+Project-URL: Issues, https://github.com/ashley/lorcana-sim/issues
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Topic :: Games/Entertainment
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: black>=22.0.0; extra == "dev"
+Requires-Dist: flake8>=5.0.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Provides-Extra: test
+Requires-Dist: pytest>=7.0.0; extra == "test"
+Requires-Dist: pytest-cov>=4.0.0; extra == "test"
+
+# Lorcana Simulation
+
+A comprehensive Python-based simulation of the Lorcana Trading Card Game.
+
+## Installation
+
+```bash
+pip install -e .
+```
+
+For development:
+
+```bash
+pip install -e .[dev]
+```
+
+## Usage
+
+```python
+from lorcana_sim.models.cards import CardFactory
+from lorcana_sim.loaders import LorcanaJsonParser
+
+# Load card data
+parser = LorcanaJsonParser("data/all-cards/allCards.json")
+
+# Create card objects
+cards = [CardFactory.from_json(card_data) for card_data in parser.cards]
+```
+
+## Testing
+
+```bash
+pytest
+```
+
+## Development Status
+
+Currently implementing Phase 1: Core Data Models. See `plan/` directory for detailed implementation plans.
