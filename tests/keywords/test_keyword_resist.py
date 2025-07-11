@@ -277,7 +277,7 @@ class TestResistAbilityIntegration:
         
         # Character should be dead (3 willpower < 8 damage)
         assert resist_char.is_alive == False
-        assert "destroyed" in message
+        assert "banished" in message
     
     def test_resist_damage_calculation_logic(self):
         """Test that Resist has the correct damage calculation logic."""

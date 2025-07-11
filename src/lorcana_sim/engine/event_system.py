@@ -13,17 +13,41 @@ if TYPE_CHECKING:
 
 class GameEvent(Enum):
     """Types of game events that can trigger abilities."""
+    # Character events
     CHARACTER_QUESTS = "character_quests"
     CHARACTER_CHALLENGES = "character_challenges"
     CHARACTER_TAKES_DAMAGE = "character_takes_damage"
     CHARACTER_DEALS_DAMAGE = "character_deals_damage"
     CHARACTER_PLAYED = "character_played"
-    CHARACTER_DESTROYED = "character_destroyed"
-    SONG_PLAYED = "song_played"
-    SONG_SUNG = "song_sung"
+    CHARACTER_BANISHED = "character_banished"
+    CHARACTER_ENTERS_PLAY = "character_enters_play"  # More general than played
+    CHARACTER_LEAVES_PLAY = "character_leaves_play"  # More general than banished
+    
+    # Action/Song events
+    ACTION_PLAYED = "action_played"  # Action card played for ink cost
+    SONG_PLAYED = "song_played"      # Same as ACTION_PLAYED but for songs specifically
+    SONG_SUNG = "song_sung"          # Song sung by Singer ability
+    
+    # Turn structure events
     TURN_BEGINS = "turn_begins"
     TURN_ENDS = "turn_ends"
-    PHASE_CHANGES = "phase_changes"
+    PHASE_BEGINS = "phase_begins"
+    PHASE_ENDS = "phase_ends"
+    READY_STEP = "ready_step"
+    SET_STEP = "set_step"
+    MAIN_PHASE_BEGINS = "main_phase_begins"
+    
+    # Resource events
+    CARD_DRAWN = "card_drawn"
+    INK_PLAYED = "ink_played"
+    LORE_GAINED = "lore_gained"
+    
+    # Item events
+    ITEM_PLAYED = "item_played"
+    
+    # Game state events
+    GAME_BEGINS = "game_begins"
+    GAME_ENDS = "game_ends"
 
 
 @dataclass
@@ -57,7 +81,7 @@ class GameEventManager:
             self._event_listeners[event].append(ability)
     
     def unregister_triggered_ability(self, ability: 'BaseAbility'):
-        """Unregister an ability (e.g., when character is destroyed)."""
+        """Unregister an ability (e.g., when character is banished)."""
         for event_list in self._event_listeners.values():
             if ability in event_list:
                 event_list.remove(ability)

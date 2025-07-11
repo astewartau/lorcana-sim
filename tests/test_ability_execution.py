@@ -48,18 +48,18 @@ class TestAbilityExecutionFramework:
         # Verify ability is registered
         assert len(engine.event_manager._event_listeners[GameEvent.CHARACTER_QUESTS]) == 1
         
-        # Switch to opponent and destroy the support character
+        # Switch to opponent and banish the support character
         game_state.current_player_index = 1
         
-        # Challenge and destroy the support character
+        # Challenge and banish the support character
         success, message = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
             'attacker': attacker, 
             'defender': support_char
         })
         
-        # Verify challenge succeeded and character was destroyed
+        # Verify challenge succeeded and character was banished
         assert success == True
-        assert "destroyed" in message
+        assert "banished" in message
         
         # Verify the ability was unregistered
         assert len(engine.event_manager._event_listeners.get(GameEvent.CHARACTER_QUESTS, [])) == 0

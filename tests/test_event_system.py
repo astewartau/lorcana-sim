@@ -99,8 +99,8 @@ class TestEventSystem:
         # Verify the triggered ability was registered
         assert len(engine.event_manager._event_listeners[GameEvent.CHARACTER_QUESTS]) == 1
     
-    def test_event_manager_unregisters_abilities_on_character_destruction(self):
-        """Test that abilities are unregistered when characters are destroyed."""
+    def test_event_manager_unregisters_abilities_on_character_banishment(self):
+        """Test that abilities are unregistered when characters are banished."""
         # Create characters with Support
         support_ability = KeywordRegistry.create_keyword_ability('Support')
         support_char = create_character_with_ability("Supporter", support_ability, willpower=1)
@@ -117,15 +117,15 @@ class TestEventSystem:
         # Switch to opponent to challenge
         game_state.current_player_index = 1
         
-        # Challenge and destroy the support character
+        # Challenge and banish the support character
         success, message = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
             'attacker': attacker, 
             'defender': support_char
         })
         
-        # Verify challenge succeeded and character was destroyed
+        # Verify challenge succeeded and character was banished
         assert success == True
-        assert "destroyed" in message
+        assert "banished" in message
         
         # Verify the ability was unregistered
         assert len(engine.event_manager._event_listeners.get(GameEvent.CHARACTER_QUESTS, [])) == 0
