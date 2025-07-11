@@ -13,8 +13,9 @@ from pprint import pprint
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / 'src'))
 
-from loaders.lorcana_json_parser import LorcanaJsonParser
-from loaders.dreamborn_parser import DreambornParser
+from lorcana_sim.loaders.lorcana_json_parser import LorcanaJsonParser
+from lorcana_sim.loaders.dreamborn_parser import DreambornParser
+from lorcana_sim.utils.ability_analyzer import AbilityAnalyzer
 
 
 def print_section(title: str, content: str = "") -> None:
@@ -81,20 +82,32 @@ def main():
     display_top_items(card_stats.cards_by_story, "Top Disney Stories", 15)
     
     # =================================================================
-    # ABILITY ANALYSIS
+    # ABILITY ANALYSIS  
     # =================================================================
     print_section("ABILITY SYSTEM ANALYSIS")
     
-    ability_stats = lorcana_parser.get_ability_statistics()
-    print(f"Total abilities across all cards: {ability_stats.total_abilities}")
-    print(f"Unique ability names: {len(ability_stats.unique_ability_names)}")
-    print(f"Unique keywords: {len(ability_stats.unique_keywords)}")
+    # Filter out cards with empty colors for analysis
+    valid_cards = [card for card in lorcana_parser.cards if card.get('color', '')]
+    print(f"Analyzing {len(valid_cards)} valid cards (excluding {len(lorcana_parser.cards) - len(valid_cards)} promotional variants)...")
+    
+    # Use our new AbilityAnalyzer
+    analyzer = AbilityAnalyzer(valid_cards)
+    analyzer.print_summary()
+    
+    # Export detailed catalog for reference
+    print("\nExporting detailed ability catalog...")
+    analyzer.export_ability_catalog("ability_catalog.json")
+    print("📁 Saved detailed analysis to 'ability_catalog.json'")
+    
+    # Legacy stats for comparison
+    ability_stats = lorcana_parser.get_ability_statistics() 
+    print(f"\nLegacy parser stats (for comparison):")
+    print(f"  Total abilities across all cards: {ability_stats.total_abilities}")
+    print(f"  Unique ability names: {len(ability_stats.unique_ability_names)}")
+    print(f"  Unique keywords: {len(ability_stats.unique_keywords)}")
     
     display_top_items(ability_stats.abilities_by_type, "Abilities by Type")
     display_top_items(ability_stats.keyword_abilities, "Top Keyword Abilities", 20)
-    
-    print(f"\nAll Ability Types: {lorcana_parser.get_unique_ability_types()}")
-    print(f"\nAll Keywords: {lorcana_parser.get_unique_keywords()}")
     
     # =================================================================
     # CHARACTER ANALYSIS

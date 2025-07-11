@@ -44,6 +44,9 @@ class CardFactory:
         """Parse fields common to all card types."""
         # Handle color - could be single color or multi-color like "Amber-Steel"
         color_str = card_data.get("color", "")
+        if not color_str:
+            raise ValueError(f"Card has empty color field: {card_data.get('fullName', 'Unknown')}")
+        
         try:
             color = CardColor(color_str)
         except ValueError:
@@ -66,7 +69,7 @@ class CardFactory:
             "set_code": card_data["setCode"],
             "number": card_data["number"],
             "story": card_data["story"],
-            "abilities": CardFactory._parse_abilities(card_data.get("abilities", [])),
+            "abilities": CardFactory._parse_abilities(card_data),
             "flavor_text": card_data.get("flavorText"),
             "full_text": card_data.get("fullText", ""),
             "artists": card_data.get("artists", [])
@@ -111,10 +114,12 @@ class CardFactory:
         }
     
     @staticmethod
-    def _parse_abilities(abilities_data: List[Dict[str, Any]]) -> List[Ability]:
-        """Parse abilities from JSON structure."""
+    def _parse_abilities(card_data: Dict[str, Any]) -> List[Ability]:
+        """Parse abilities from both abilities and keywordAbilities arrays."""
         abilities = []
         
+        # Parse structured abilities array
+        abilities_data = card_data.get("abilities", [])
         for ability_data in abilities_data:
             ability_type_str = ability_data.get("type", "")
             name = ability_data.get("name", "")
@@ -123,9 +128,10 @@ class CardFactory:
             
             if ability_type_str == "keyword":
                 keyword = ability_data.get("keyword", "")
-                value = ability_data.get("value")  # For abilities like "Singer 5"
+                # Extract value from keywordValueNumber (not value)
+                value = ability_data.get("keywordValueNumber")
                 abilities.append(KeywordAbility(
-                    name=name,
+                    name=name or keyword,  # Use keyword as name if name is empty
                     type=AbilityType.KEYWORD,
                     effect=effect,
                     full_text=full_text,
@@ -164,6 +170,27 @@ class CardFactory:
                     full_text=full_text
                 ))
         
+        # Parse keywordAbilities array and merge with existing
+        keyword_abilities_from_array = set(card_data.get("keywordAbilities", []))
+        keywords_already_parsed = set()
+        
+        # Track which keywords already have structured data
+        for ability in abilities:
+            if hasattr(ability, 'keyword') and ability.keyword:
+                keywords_already_parsed.add(ability.keyword)
+        
+        # Add missing keywords from keywordAbilities array
+        missing_keywords = keyword_abilities_from_array - keywords_already_parsed
+        for keyword_name in missing_keywords:
+            abilities.append(KeywordAbility(
+                name=keyword_name,
+                type=AbilityType.KEYWORD,
+                effect=f'{keyword_name} keyword ability',
+                full_text='',
+                keyword=keyword_name,
+                value=None
+            ))
+        
         return abilities
     
     @staticmethod
@@ -176,17 +203,31 @@ class CardFactory:
         return None
     
     @staticmethod
-    def create_cards_from_database(card_database: List[Dict[str, Any]]) -> List[Card]:
+    def create_cards_from_database(card_database) -> List[Card]:
         """Create all cards from a lorcana-json database."""
+        # Handle both file path string and list of card data
+        if isinstance(card_database, str):
+            from ...loaders.lorcana_json_parser import LorcanaJsonParser
+            parser = LorcanaJsonParser(card_database)
+            card_database = parser.cards
         cards = []
         errors = []
+        skipped_empty_color = 0
         
         for card_data in card_database:
             try:
+                # Skip cards with empty color (likely promotional/special variants)
+                if not card_data.get("color", ""):
+                    skipped_empty_color += 1
+                    continue
+                    
                 card = CardFactory.from_json(card_data)
                 cards.append(card)
             except Exception as e:
                 errors.append(f"Error creating card {card_data.get('fullName', 'Unknown')}: {e}")
+        
+        if skipped_empty_color > 0:
+            print(f"Skipped {skipped_empty_color} cards with empty color fields (likely promotional variants)")
         
         if errors:
             print(f"Encountered {len(errors)} errors while creating cards:")
