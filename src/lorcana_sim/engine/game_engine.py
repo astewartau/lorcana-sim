@@ -257,8 +257,9 @@ class GameEngine:
     
     def _execute_quest_character(self, character: CharacterCard) -> ActionResult:
         """Execute questing with a character."""
-        if character.can_quest(self.game_state.turn_number):
+        if character.can_quest(self.game_state.turn_number) and not self.game_state.has_character_acted_this_turn(character.id):
             character.exert()
+            self.game_state.mark_character_acted(character.id)
             current_player = self.game_state.current_player
             
             # Trigger CHARACTER_QUESTS event BEFORE gaining lore (in case abilities modify lore)
@@ -305,15 +306,23 @@ class GameEngine:
                 triggered_abilities=trigger_results or []
             )
         
+        # Check if character has already acted this turn
+        if self.game_state.has_character_acted_this_turn(character.id):
+            return ActionResult.failure_result(GameAction.QUEST_CHARACTER, "Character has already acted this turn")
+        
         return ActionResult.failure_result(GameAction.QUEST_CHARACTER, "Character cannot quest")
     
     def _execute_challenge(self, attacker: CharacterCard, defender: CharacterCard) -> ActionResult:
         """Execute a challenge between characters."""
+        if self.game_state.has_character_acted_this_turn(attacker.id):
+            return ActionResult.failure_result(GameAction.CHALLENGE_CHARACTER, "Character has already acted this turn")
+        
         if not self.validator.can_challenge(attacker, defender):
             return ActionResult.failure_result(GameAction.CHALLENGE_CHARACTER, "Invalid challenge")
         
-        # Exert attacker
+        # Exert attacker and mark as acted
         attacker.exert()
+        self.game_state.mark_character_acted(attacker.id)
         
         # Trigger CHARACTER_CHALLENGES event
         current_player = self.game_state.current_player

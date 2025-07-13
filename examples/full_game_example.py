@@ -49,15 +49,42 @@ def get_ability_summary(character):
         if 'rush' in name:
             abilities.append("Rush")
         elif 'support' in name:
-            abilities.append(f"Support {name.split()[-1] if name.split()[-1].isdigit() else '1'}")
+            abilities.append("Support")
         elif 'resist' in name:
-            abilities.append(f"Resist {name.split()[-1] if name.split()[-1].isdigit() else '1'}")
+            # Extract resist value
+            parts = name.split()
+            value = next((p for p in parts if p.isdigit()), '1')
+            abilities.append(f"Resist {value}")
         elif 'singer' in name:
-            abilities.append(f"Singer {name.split()[-1] if name.split()[-1].isdigit() else '3'}")
+            # Extract singer value
+            parts = name.split()
+            value = next((p for p in parts if p.isdigit()), '4')
+            abilities.append(f"Singer {value}")
+        elif 'challenger' in name:
+            # Extract challenger value
+            parts = name.split()
+            value = next((p.replace('+', '') for p in parts if '+' in p or p.isdigit()), '1')
+            abilities.append(f"Challenger +{value}")
         elif 'evasive' in name:
             abilities.append("Evasive")
         elif 'bodyguard' in name:
             abilities.append("Bodyguard")
+        elif 'ward' in name:
+            abilities.append("Ward")
+        elif 'reckless' in name:
+            abilities.append("Reckless")
+        elif 'vanish' in name:
+            abilities.append("Vanish")
+        elif 'shift' in name:
+            # Extract shift value
+            parts = name.split()
+            value = next((p for p in parts if p.isdigit()), '1')
+            abilities.append(f"Shift {value}")
+        elif 'sing together' in name:
+            # Extract sing together value
+            parts = name.split()
+            value = next((p for p in parts if p.isdigit()), '4')
+            abilities.append(f"Sing Together {value}")
     
     return f" ({', '.join(abilities)})" if abilities else ""
 
@@ -165,10 +192,8 @@ def format_action_result(result: ActionResult, game_state: GameState) -> list[st
             messages.append(f"🎮 {player.name} - Play phase")
             
     elif result.result_type == ActionResultType.TURN_ENDED:
-        old_player = result.data['old_player']
-        new_player = result.data['new_player']
-        turn_number = result.data['turn_number']
-        messages.append(f"⚪ {new_player.name} begins turn {turn_number} - Ready phase")
+        # Don't add turn transition message here - will be handled after board state
+        pass
     
     # Handle triggered abilities
     if result.data.get('triggered_abilities'):
@@ -228,59 +253,223 @@ def print_board_state(game_state):
     print(f"   Turn {game_state.turn_number}, {current.name}'s {game_state.current_phase.value} phase")
 
 
-def choose_random_action(engine):
-    """Choose a random legal action, with some basic priorities."""
+def analyze_board_threats(engine):
+    """Analyze opponent's board and calculate potential lore gains."""
+    game_state = engine.game_state
+    opponent = game_state.players[1 - game_state.current_player_index]
+    
+    # Calculate how much lore opponent could gain next turn if all characters quest
+    opponent_potential_lore = 0
+    dangerous_characters = []
+    
+    for character in opponent.characters_in_play:
+        if not character.exerted and character.is_dry:  # Can act next turn
+            char_lore = character.current_lore
+            opponent_potential_lore += char_lore
+            # Characters with 2+ lore are "dangerous" threats
+            if char_lore >= 2:
+                dangerous_characters.append((character, char_lore))
+    
+    return opponent_potential_lore, dangerous_characters
+
+
+def evaluate_combat_trades(engine, challenge_actions):
+    """Evaluate potential combat trades and find the most valuable ones."""
+    trades = []
+    
+    for action, params in challenge_actions:
+        attacker = params['attacker']
+        defender = params['defender']
+        
+        # Simple combat calculation (not accounting for all abilities yet)
+        attacker_damage = defender.current_strength
+        defender_damage = attacker.current_strength
+        
+        attacker_survives = attacker.current_willpower > attacker_damage
+        defender_dies = defender.current_willpower <= defender_damage
+        
+        # Calculate trade value: lore we prevent - lore we lose
+        lore_prevented = defender.current_lore if defender_dies else 0
+        lore_lost = attacker.current_lore if not attacker_survives else 0
+        trade_value = lore_prevented - lore_lost
+        
+        trades.append({
+            'action': action,
+            'params': params,
+            'trade_value': trade_value,
+            'attacker_survives': attacker_survives,
+            'defender_dies': defender_dies,
+            'lore_prevented': lore_prevented,
+            'lore_lost': lore_lost
+        })
+    
+    # Sort by trade value (best trades first)
+    trades.sort(key=lambda x: x['trade_value'], reverse=True)
+    return trades
+
+
+def choose_strategic_action(engine):
+    """Choose a strategic action based on game state analysis."""
     legal_actions = engine.validator.get_all_legal_actions()
     
     if not legal_actions:
         return None, None
     
-    # Basic priorities: 
-    # 1. Progress through non-play phases quickly
-    # 2. Play ink early game
-    # 3. Play characters if affordable
-    # 4. Quest/challenge randomly
-    # 5. Pass turn eventually
-    
-    current_player = engine.game_state.current_player
-    phase = engine.game_state.current_phase
+    game_state = engine.game_state
+    current_player = game_state.current_player
+    opponent = game_state.players[1 - game_state.current_player_index]
+    phase = game_state.current_phase
     
     # Auto-progress non-play phases
     for action, params in legal_actions:
         if action == GameAction.PROGRESS and phase != Phase.PLAY:
             return action, params
     
-    # Play ink if low
+    # Play ink if low (keep existing logic)
     if current_player.total_ink < 6:
         ink_actions = [(a, p) for a, p in legal_actions if a == GameAction.PLAY_INK]
         if ink_actions:
             return random.choice(ink_actions)
     
-    # Play characters if affordable
-    char_actions = [(a, p) for a, p in legal_actions if a == GameAction.PLAY_CHARACTER]
-    affordable_chars = [(a, p) for a, p in char_actions if current_player.can_afford(p['card'])]
-    if affordable_chars:
-        return random.choice(affordable_chars)
+    # Early game: prioritize board development if no characters in play
+    if len(current_player.characters_in_play) == 0:
+        char_actions = [(a, p) for a, p in legal_actions if a == GameAction.PLAY_CHARACTER]
+        affordable_chars = [(a, p) for a, p in char_actions if current_player.can_afford(p['card'])]
+        if affordable_chars:
+            print(f"   🏗️  Strategic: Early game board development")
+            return random.choice(affordable_chars)
     
-    # Prefer questing for lore (80% chance)
+    # Mid game: balance character playing with board actions
+    if len(current_player.characters_in_play) < 3 and current_player.total_ink >= 3:
+        char_actions = [(a, p) for a, p in legal_actions if a == GameAction.PLAY_CHARACTER]
+        affordable_chars = [(a, p) for a, p in char_actions if current_player.can_afford(p['card'])]
+        # 50% chance to play a character if we have few characters
+        if affordable_chars and random.random() < 0.5:
+            print(f"   🎭 Strategic: Building board presence")
+            return random.choice(affordable_chars)
+    
+    # Now for the strategic part: quest vs challenge decisions
     quest_actions = [(a, p) for a, p in legal_actions if a == GameAction.QUEST_CHARACTER]
     challenge_actions = [(a, p) for a, p in legal_actions if a == GameAction.CHALLENGE_CHARACTER]
     sing_actions = [(a, p) for a, p in legal_actions if a == GameAction.SING_SONG]
     
+    if not (quest_actions or challenge_actions or sing_actions):
+        # No character actions available, progress/pass
+        progress_actions = [(a, p) for a, p in legal_actions if a in [GameAction.PROGRESS, GameAction.PASS_TURN]]
+        if progress_actions:
+            return random.choice(progress_actions)
+        return random.choice(legal_actions) if legal_actions else (None, None)
+    
+    # STRATEGIC DECISION MAKING STARTS HERE
+    
+    # Calculate current lore positions
+    my_lore = current_player.lore
+    opponent_lore = opponent.lore
+    
+    # Analyze potential lore I can gain this turn
+    my_potential_lore = sum(p['character'].current_lore for a, p in quest_actions)
+    
+    # Analyze opponent's board threats
+    opponent_potential_lore, dangerous_characters = analyze_board_threats(engine)
+    
+    # PRIORITY 1: Can I win this turn by questing?
+    if my_lore + my_potential_lore >= 20:
+        print(f"   🎯 Strategic: Going for the win! ({my_lore} + {my_potential_lore} = {my_lore + my_potential_lore} lore)")
+        # Quest with highest lore characters first to guarantee win
+        quest_actions.sort(key=lambda x: x[1]['character'].current_lore, reverse=True)
+        return quest_actions[0]
+    
+    # PRIORITY 2: Can opponent win next turn? Must challenge to prevent!
+    if opponent_lore + opponent_potential_lore >= 20:
+        if challenge_actions:
+            trades = evaluate_combat_trades(engine, challenge_actions)
+            # Focus on killing the most dangerous characters
+            best_preventive_trade = None
+            for trade in trades:
+                if trade['defender_dies'] and trade['lore_prevented'] >= 2:
+                    best_preventive_trade = trade
+                    break
+            
+            if best_preventive_trade:
+                defender_name = best_preventive_trade['params']['defender'].name
+                lore_prevented = best_preventive_trade['lore_prevented']
+                print(f"   🛡️  Strategic: Preventing opponent win by challenging {defender_name} (prevents {lore_prevented} lore)")
+                return best_preventive_trade['action'], best_preventive_trade['params']
+        
+        # If no good challenges, still try to quest for the race
+        print(f"   ⚡ Strategic: Racing for lore (opponent could get {opponent_potential_lore} next turn)")
+    
+    # PRIORITY 3: Evaluate board control vs lore race
+    lore_difference = my_lore - opponent_lore
+    
+    # If I'm significantly behind in lore (5+), focus on questing
+    if lore_difference <= -5:
+        print(f"   📈 Strategic: Behind by {abs(lore_difference)} lore, focusing on questing")
+        if quest_actions:
+            return random.choice(quest_actions)
+    
+    # If I'm significantly ahead in lore (7+), I can afford to challenge for board control
+    elif lore_difference >= 7:
+        print(f"   🏰 Strategic: Ahead by {lore_difference} lore, maintaining board control")
+        if challenge_actions:
+            trades = evaluate_combat_trades(engine, challenge_actions)
+            if trades and trades[0]['trade_value'] > 0:  # Only if it's a good trade
+                best_trade = trades[0]
+                print(f"      → Taking good trade (value: {best_trade['trade_value']})")
+                return best_trade['action'], best_trade['params']
+    
+    # PRIORITY 4: Threat assessment - challenge dangerous characters
+    if dangerous_characters and challenge_actions:
+        trades = evaluate_combat_trades(engine, challenge_actions)
+        for trade in trades:
+            defender = trade['params']['defender']
+            # Challenge if we can kill a dangerous character with positive trade value
+            if (trade['defender_dies'] and 
+                trade['trade_value'] >= 0 and 
+                any(char == defender for char, lore in dangerous_characters)):
+                
+                print(f"   ⚔️  Strategic: Eliminating threat {defender.name} (trade value: {trade['trade_value']})")
+                return trade['action'], trade['params']
+    
+    # PRIORITY 5: Default to questing for lore, but consider tempo
+    # If opponent has a much better board (3+ more ready characters), might want to challenge
+    my_ready_chars = len([c for c in current_player.characters_in_play if not c.exerted])
+    opponent_ready_chars = len([c for c in opponent.characters_in_play if not c.exerted and c.is_dry])
+    
+    if opponent_ready_chars >= my_ready_chars + 3 and challenge_actions:
+        trades = evaluate_combat_trades(engine, challenge_actions)
+        if trades and trades[0]['trade_value'] >= -1:  # Accept small negative trades to catch up
+            print(f"   🔄 Strategic: Behind on board ({my_ready_chars} vs {opponent_ready_chars}), trading")
+            return trades[0]['action'], trades[0]['params']
+    
+    # Default: Quest for lore
+    if quest_actions:
+        print(f"   ⭐ Strategic: Default questing (lore: {my_lore} vs {opponent_lore})")
+        return random.choice(quest_actions)
+    
+    # If no character actions available, try playing characters (higher priority now)
+    char_actions = [(a, p) for a, p in legal_actions if a == GameAction.PLAY_CHARACTER]
+    affordable_chars = [(a, p) for a, p in char_actions if current_player.can_afford(p['card'])]
+    if affordable_chars:
+        print(f"   🎭 Strategic: Continuing board development")
+        return random.choice(affordable_chars)
+    
+    # Fallback to any available action
     available_actions = quest_actions + challenge_actions + sing_actions
     if available_actions:
-        if random.random() < 0.8 and quest_actions:  # Strongly prefer questing
-            return random.choice(quest_actions)
-        else:
-            return random.choice(available_actions)
+        return random.choice(available_actions)
     
-    # Default to progress/pass
+    # Final fallback
     progress_actions = [(a, p) for a, p in legal_actions if a in [GameAction.PROGRESS, GameAction.PASS_TURN]]
     if progress_actions:
         return random.choice(progress_actions)
     
-    # Fallback to any action
-    return random.choice(legal_actions)
+    return random.choice(legal_actions) if legal_actions else (None, None)
+
+
+def choose_random_action(engine):
+    """Choose a strategic action based on game state analysis."""
+    return choose_strategic_action(engine)
 
 
 def simulate_random_game():
@@ -293,11 +482,11 @@ def simulate_random_game():
     
     turn_count = 0
     max_turns = 200  # Safety limit
-    last_board_change = 0
     first_action = True  # Track if this is the first action
     
     print_board_state(game_state)
     print()
+    print(f"⚪ {game_state.current_player.name} begins turn {game_state.turn_number} - Ready phase")
     
     while turn_count < max_turns:
         turn_count += 1
@@ -334,9 +523,8 @@ def simulate_random_game():
         # Execute action
         result = engine.execute_action(action, params)
         
-        # Special case: display first player's ready phase before first action
+        # Track if this is the first action (no longer need to print turn start)
         if first_action:
-            print(f"⚪ {current_player.name} begins turn {game_state.turn_number} - Ready phase")
             first_action = False
         
         # Format and display the action result
@@ -350,22 +538,16 @@ def simulate_random_game():
         # Capture state after action for board state logic
         lore_after = current_player.lore
         
-        # Track board changes for printing
-        if result.result_type == ActionResultType.CHARACTER_PLAYED:
-            last_board_change = turn_count
-        
-        # Print board state after significant changes
-        should_print_board = (
-            action == GameAction.PLAY_CHARACTER or  # New character
-            action == GameAction.CHALLENGE_CHARACTER or  # Combat
-            (ashley.lore >= 10 and ashley.lore % 5 == 0 and action == GameAction.QUEST_CHARACTER) or  # Every 5 lore past 10
-            (tace.lore >= 10 and tace.lore % 5 == 0 and action == GameAction.QUEST_CHARACTER) or
-            turn_count % 30 == 0  # Every 30 turns
-        )
-        
-        if should_print_board:
+        # Print board state at the end of each player's turn
+        if result.result_type == ActionResultType.TURN_ENDED:
+            print()  # Blank line before board state
             print_board_state(game_state)
-            print()
+            
+            # Add turn transition message for next player
+            new_player = result.data['new_player']
+            turn_number = result.data['turn_number']
+            print()  # Blank line after board state
+            print(f"⚪ {new_player.name} begins turn {turn_number} - Ready phase")
     
     # Final results
     print("=" * 50)

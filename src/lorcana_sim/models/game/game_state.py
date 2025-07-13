@@ -50,6 +50,7 @@ class GameState:
     # Turn State Tracking
     ink_played_this_turn: bool = False
     actions_this_turn: List[GameAction] = field(default_factory=list)
+    characters_acted_this_turn: List[int] = field(default_factory=list)  # Track character IDs that have acted
     
     # Global Game Elements
     locations_in_play: List[LocationCard] = field(default_factory=list)
@@ -150,6 +151,7 @@ class GameState:
         # Reset turn state
         self.ink_played_this_turn = False
         self.actions_this_turn.clear()
+        self.characters_acted_this_turn.clear()
         
         # Move to next player
         self.current_player_index = (self.current_player_index + 1) % len(self.players)
@@ -200,6 +202,15 @@ class GameState:
     def can_play_ink(self) -> bool:
         """Check if current player can play ink."""
         return not self.ink_played_this_turn and self.current_phase.value == 'play'
+    
+    def has_character_acted_this_turn(self, character_id: int) -> bool:
+        """Check if a character has already acted this turn."""
+        return character_id in self.characters_acted_this_turn
+    
+    def mark_character_acted(self, character_id: int) -> None:
+        """Mark that a character has acted this turn."""
+        if character_id not in self.characters_acted_this_turn:
+            self.characters_acted_this_turn.append(character_id)
     
     def can_perform_action(self, action: GameAction) -> bool:
         """Check if current player can perform the given action."""

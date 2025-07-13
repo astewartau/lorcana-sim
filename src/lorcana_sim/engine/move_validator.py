@@ -130,7 +130,8 @@ class MoveValidator:
         """Get characters that can quest this turn."""
         current_player = self.game_state.current_player
         current_turn = self.game_state.turn_number
-        return [char for char in current_player.characters_in_play if char.can_quest(current_turn)]
+        return [char for char in current_player.characters_in_play 
+                if char.can_quest(current_turn) and not self.game_state.has_character_acted_this_turn(char.id)]
     
     def get_possible_challenges(self) -> List[Tuple[CharacterCard, CharacterCard]]:
         """Get all possible (attacker, defender) challenge pairs."""
@@ -139,9 +140,9 @@ class MoveValidator:
         current_turn = self.game_state.turn_number
         
         challenges = []
-        # Get attackers that can challenge (considering ink drying and Rush)
+        # Get attackers that can challenge (considering ink drying and Rush, and haven't acted this turn)
         ready_attackers = [char for char in current_player.characters_in_play 
-                          if char.can_challenge(current_turn)]
+                          if char.can_challenge(current_turn) and not self.game_state.has_character_acted_this_turn(char.id)]
         possible_defenders = opponent.characters_in_play
         
         for attacker in ready_attackers:
