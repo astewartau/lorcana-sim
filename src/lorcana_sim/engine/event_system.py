@@ -87,56 +87,21 @@ class GameEventManager:
                     listener_events = listener.relevant_events()
                     relevant_events.update(listener_events)
                 
-            # If no relevant events found, fall back to name-based detection
+            # If no relevant events found, the ability doesn't need event registration
             if not relevant_events:
-                relevant_events = set(self._get_relevant_events_for_ability(ability))
+                return
         else:
-            # Fall back to old method for non-composable abilities
-            relevant_events = set(self._get_relevant_events_for_ability(ability))
+            # For non-composable abilities, they must implement get_relevant_events() method
+            if hasattr(ability, 'get_relevant_events'):
+                relevant_events = set(ability.get_relevant_events())
+            else:
+                raise ValueError(f"Ability '{getattr(ability, 'name', ability)}' must implement get_relevant_events() method")
         
         for event in relevant_events:
             if event not in self._composable_listeners:
                 self._composable_listeners[event] = []
             self._composable_listeners[event].append(ability)
     
-    def _get_relevant_events_for_ability(self, ability) -> list:
-        """Determine which events an ability should listen to based on its type."""
-        # Check if the ability has specific event requirements
-        if hasattr(ability, 'keyword'):
-            keyword = ability.keyword
-            if keyword == 'Rush':
-                return []  # Rush doesn't need to listen to any events - it affects move validation
-            elif keyword == 'Support':
-                return [GameEvent.CHARACTER_QUESTS]
-            elif keyword == 'Resist':
-                return [GameEvent.CHARACTER_TAKES_DAMAGE]
-            elif keyword == 'Singer':
-                return [GameEvent.SONG_SUNG]
-            elif keyword == 'Evasive':
-                return []  # Evasive affects move validation, not events
-            elif keyword == 'Bodyguard':
-                return []  # Bodyguard affects move validation, not events
-        
-        # For composable abilities, check the name property
-        if hasattr(ability, 'name'):
-            name = ability.name.lower()
-            if 'rush' in name:
-                return [GameEvent.CHARACTER_ENTERS_PLAY]  # Rush triggers when character enters play
-            elif 'support' in name:
-                return [GameEvent.CHARACTER_QUESTS]  # Support triggers when character quests
-            elif 'resist' in name:
-                return [GameEvent.CHARACTER_TAKES_DAMAGE]  # Resist triggers on damage
-            elif 'singer' in name:
-                return [GameEvent.SONG_SUNG]  # Singer triggers on song events
-            elif 'evasive' in name:
-                return [GameEvent.CHARACTER_CHALLENGES]  # Evasive triggers on challenge attempts
-            elif 'bodyguard' in name:
-                return [GameEvent.CHARACTER_CHALLENGES]  # Bodyguard triggers on challenges (to redirect them)
-            elif 'ward' in name:
-                return [GameEvent.CHARACTER_TAKES_DAMAGE]  # Ward triggers on targeting attempts
-        
-        # Fallback - return empty list for unknown abilities to prevent spurious triggers
-        return []
     
     def unregister_composable_ability(self, ability: Any) -> None:
         """Unregister a composable ability from the event manager."""

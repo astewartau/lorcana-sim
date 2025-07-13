@@ -191,6 +191,9 @@ def when_targeted_by_ability(character: Any) -> Callable[[EventContext], bool]:
         if event_context.additional_data and event_context.additional_data.get('targeting_attempt'):
             return event_context.target == character
         return False
+    
+    # Add event information for introspection
+    condition.get_relevant_events = lambda: [GameEvent.CHARACTER_TAKES_DAMAGE, GameEvent.CHARACTER_CHALLENGES]
     return condition
 
 
@@ -223,6 +226,16 @@ def and_conditions(*conditions: Callable[[EventContext], bool]) -> Callable[[Eve
     """Combine multiple conditions with AND logic."""
     def combined_condition(event_context: EventContext) -> bool:
         return all(condition(event_context) for condition in conditions)
+    
+    # Combine relevant events from all conditions
+    def get_combined_events():
+        all_events = set()
+        for condition in conditions:
+            if hasattr(condition, 'get_relevant_events'):
+                all_events.update(condition.get_relevant_events())
+        return list(all_events)
+    
+    combined_condition.get_relevant_events = get_combined_events
     return combined_condition
 
 
@@ -230,6 +243,16 @@ def or_conditions(*conditions: Callable[[EventContext], bool]) -> Callable[[Even
     """Combine multiple conditions with OR logic."""
     def combined_condition(event_context: EventContext) -> bool:
         return any(condition(event_context) for condition in conditions)
+    
+    # Combine relevant events from all conditions
+    def get_combined_events():
+        all_events = set()
+        for condition in conditions:
+            if hasattr(condition, 'get_relevant_events'):
+                all_events.update(condition.get_relevant_events())
+        return list(all_events)
+    
+    combined_condition.get_relevant_events = get_combined_events
     return combined_condition
 
 
@@ -237,6 +260,13 @@ def not_condition(condition: Callable[[EventContext], bool]) -> Callable[[EventC
     """Negate a condition."""
     def negated_condition(event_context: EventContext) -> bool:
         return not condition(event_context)
+    
+    # Forward relevant events from the wrapped condition
+    if hasattr(condition, 'get_relevant_events'):
+        negated_condition.get_relevant_events = condition.get_relevant_events
+    else:
+        negated_condition.get_relevant_events = lambda: []
+    
     return negated_condition
 
 
@@ -244,6 +274,9 @@ def metadata_condition(key: str, value: Any) -> Callable[[EventContext], bool]:
     """Create a condition that checks additional_data."""
     def condition(event_context: EventContext) -> bool:
         return event_context.additional_data and event_context.additional_data.get(key) == value
+    
+    # Metadata conditions could apply to any event, so return empty list to be conservative
+    condition.get_relevant_events = lambda: []
     return condition
 
 

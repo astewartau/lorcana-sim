@@ -258,12 +258,15 @@ def analyze_board_threats(engine):
     game_state = engine.game_state
     opponent = game_state.players[1 - game_state.current_player_index]
     
-    # Calculate how much lore opponent could gain next turn if all characters quest
+    # Calculate how much lore opponent could gain on their next turn
     opponent_potential_lore = 0
     dangerous_characters = []
     
     for character in opponent.characters_in_play:
-        if not character.exerted and character.is_dry:  # Can act next turn
+        # Characters that will be ready on opponent's next turn can quest
+        # This includes: currently ready characters, and exerted characters (they'll ready at start of turn)
+        # But excludes characters with wet ink (they need to dry first)
+        if character.is_dry:  # Character can act once it's their turn (wet ink can't act)
             char_lore = character.current_lore
             opponent_potential_lore += char_lore
             # Characters with 2+ lore are "dangerous" threats
@@ -372,6 +375,12 @@ def choose_strategic_action(engine):
     # Analyze opponent's board threats
     opponent_potential_lore, dangerous_characters = analyze_board_threats(engine)
     
+    # Debug output for critical decisions
+    if my_lore >= 15 or opponent_lore >= 15:
+        print(f"   🔍 Analysis: Me {my_lore} lore, Opponent {opponent_lore} lore")
+        print(f"   🔍 Threats: Opponent could gain {opponent_potential_lore} lore next turn")
+        print(f"   🔍 My potential: {my_potential_lore} lore this turn")
+    
     # PRIORITY 1: Can I win this turn by questing?
     if my_lore + my_potential_lore >= 20:
         print(f"   🎯 Strategic: Going for the win! ({my_lore} + {my_potential_lore} = {my_lore + my_potential_lore} lore)")
@@ -381,23 +390,47 @@ def choose_strategic_action(engine):
     
     # PRIORITY 2: Can opponent win next turn? Must challenge to prevent!
     if opponent_lore + opponent_potential_lore >= 20:
+        print(f"   🚨 CRITICAL: Opponent can win next turn! ({opponent_lore} + {opponent_potential_lore} >= 20)")
+        print(f"   🔍 Available challenges: {len(challenge_actions)}")
         if challenge_actions:
+            # Debug: show what challenges are possible
+            for action, params in challenge_actions:
+                attacker = params['attacker']
+                defender = params['defender']
+                print(f"      → {attacker.name} can challenge {defender.name} (lore {defender.current_lore})")
+            
             trades = evaluate_combat_trades(engine, challenge_actions)
-            # Focus on killing the most dangerous characters
+            # When preventing opponent win, be less picky about trades
             best_preventive_trade = None
             for trade in trades:
-                if trade['defender_dies'] and trade['lore_prevented'] >= 2:
+                # Accept any trade that kills a character with 1+ lore
+                if trade['defender_dies'] and trade['lore_prevented'] >= 1:
                     best_preventive_trade = trade
                     break
+            
+            # If no killing blows available, try any challenge that does damage
+            if not best_preventive_trade and trades:
+                for trade in trades:
+                    if trade['lore_prevented'] > 0:  # Any lore prevention is better than nothing
+                        best_preventive_trade = trade
+                        break
             
             if best_preventive_trade:
                 defender_name = best_preventive_trade['params']['defender'].name
                 lore_prevented = best_preventive_trade['lore_prevented']
                 print(f"   🛡️  Strategic: Preventing opponent win by challenging {defender_name} (prevents {lore_prevented} lore)")
                 return best_preventive_trade['action'], best_preventive_trade['params']
+            else:
+                print(f"   ❌ No viable trades found (all challenges result in net loss)")
+        else:
+            # Debug: show why no challenges available
+            my_chars = [c.name for c in current_player.characters_in_play if not c.exerted and c.is_dry]
+            opponent_chars = [f"{c.name}({c.current_lore})" for c in opponent.characters_in_play]
+            print(f"   🔍 My ready characters: {my_chars}")
+            print(f"   🔍 Opponent characters: {opponent_chars}")
         
-        # If no good challenges, still try to quest for the race
-        print(f"   ⚡ Strategic: Racing for lore (opponent could get {opponent_potential_lore} next turn)")
+        # If no challenges available, still try to quest for the race
+        print(f"   ⚡ Strategic: No challenges available, racing for lore (opponent could get {opponent_potential_lore} next turn)")
     
     # PRIORITY 3: Evaluate board control vs lore race
     lore_difference = my_lore - opponent_lore
