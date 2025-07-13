@@ -13,13 +13,18 @@
 
 **Total Abilities**: 1,222 unique abilities across 1,933 cards
 
-### ✅ Implemented & Tested (3/14 keywords)
+### ✅ Implemented & Tested (8/14 keywords)
 - **Singer** (21 cards) - Cost reduction for songs ✅
 - **Evasive** (116 cards) - Challenge restrictions ✅  
 - **Bodyguard** (56 cards) - Challenge targeting rules ✅
+- **Shift** (189 cards) - Alternative play costs ✅
+- **Support** (45 cards) - Quest-triggered lore bonus ✅
+- **Ward** (44 cards) - Targeting protection ✅
+- **Rush** (38 cards) - Immediate challenge capability ✅
+- **Resist** (33 cards) - Damage reduction ✅
 
-**Keywords Progress**: 3/14 implemented (21.4%)  
-**Card Coverage**: ~193/1,933 cards have implemented abilities (~10%)
+**Keywords Progress**: 8/14 implemented (57.1%)  
+**Card Coverage**: ~630/1,933 cards have implemented abilities (~32.6%)
 
 ## 🧠 Understanding Abilities vs Keywords
 
@@ -54,15 +59,24 @@ The ability system is built on top of:
 
 ## 🎯 Current Test Coverage
 
-- **Unit Tests**: 12 tests (keyword registry, mechanics)
-- **Integration Tests**: 15 tests (game state integration)
-- **Total**: 106 tests passing (all existing + 27 new ability tests)
+- **Unit Tests**: 69 tests (keyword registry, mechanics)
+- **Integration Tests**: 69 tests (game state integration)
+- **Registry Tests**: 3 tests (keyword registry system)
+- **Total**: 254 tests passing (all existing + 138 ability tests)
 
 ## 🚀 Next Steps
 
-1. **Immediate**: Implement Shift keyword (189 cards impact)
-2. **Short-term**: Add Support, Ward, Rush, Resist keywords  
-3. **Medium-term**: Complete all 14 keywords
-4. **Long-term**: Implement high-value named ability patterns
+### ❌ **Remaining Keywords to Implement (6/14)**
+1. **Challenger** (31 cards) - Combat strength modifier
+2. **Reckless** (14 cards) - Forced challenge behavior
+3. **Sing Together** (16 cards) - Team song mechanics
+4. **Vanish** (7 cards) - Defensive targeting mechanic
+5. **Puppy Shift** (1 card) - Specialized shift for Puppy characters
+6. **Universal Shift** (1 card) - Universal shift mechanic
+
+### 🎯 **Priority Order**
+1. **High Priority**: Challenger, Reckless (core combat mechanics)
+2. **Medium Priority**: Sing Together, Vanish (utility mechanics)
+3. **Low Priority**: Puppy Shift, Universal Shift (specialized variants)
 
 This abilities system provides the foundation for implementing all Lorcana card mechanics, from simple keywords that affect hundreds of cards to unique named abilities that make individual cards special.

@@ -118,13 +118,14 @@ sing_actions = [action for action, params in legal_actions
 
 *Current implementation status detailed in [README.md](README.md)*
 
-- **Implemented Keywords**: 3/14 (21.4%)
+- **Implemented Keywords**: 8/14 (57.1%)
 - **Unit Test Coverage**: 100% of implemented abilities
 - **Integration Test Coverage**: 100% of implemented abilities
-- **Total Tests**: 106 (all passing)
-  - 15 integration tests for abilities
-  - 12 unit tests for abilities
-  - 79 other system tests
+- **Total Tests**: 254 (all passing)
+  - 69 integration tests for abilities
+  - 69 unit tests for abilities
+  - 3 registry tests for abilities
+  - 113 other system tests
 
 ## Quality Assurance Standards
 
@@ -143,10 +144,10 @@ sing_actions = [action for action, params in legal_actions
 ## Future Testing Expansion
 
 ### Next Priorities (as abilities are implemented)
-1. **Shift Keyword**: Alternative play costs and targeting
-2. **Support Keyword**: Multi-character effects
-3. **Ward Keyword**: Protection and targeting rules
-4. **Rush Keyword**: Timing modification effects
+1. **Challenger Keyword**: Combat strength modification
+2. **Reckless Keyword**: Forced challenge behavior
+3. **Sing Together Keyword**: Team song mechanics
+4. **Vanish Keyword**: Defensive targeting mechanics
 
 ### Long-term Testing Goals
 1. **Complex Interactions**: Multi-ability combinations
