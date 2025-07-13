@@ -136,5 +136,4 @@ src/lorcana_sim/engine/input_system.py
 src/lorcana_sim/engine/state_serializer.py
 src/lorcana_sim/engine/step_system.py
 src/lorcana_sim/engine/stepped_game_engine.py
-src/lorcana_sim/loaders/card_database.py
 src/lorcana_sim/loaders/deck_loader.py
