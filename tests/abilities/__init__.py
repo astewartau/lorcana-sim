@@ -1,1 +1,0 @@
-"""Named ability tests package."""
