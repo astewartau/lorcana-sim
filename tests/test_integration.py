@@ -185,7 +185,7 @@ def test_create_simple_game(sample_cards):
     assert len(game.players) == 2
     assert game.current_player == player1
     assert game.turn_number == 1
-    assert not game.game_over
+    assert not game.is_game_over()
     
     # Test basic game operations with the new engine
     from src.lorcana_sim.engine.move_validator import MoveValidator
@@ -198,32 +198,7 @@ def test_create_simple_game(sample_cards):
     assert len(pass_actions) > 0
 
 
-def test_card_abilities_parsing(card_database):
-    """Test that card abilities are properly parsed."""
-    cards_with_abilities = []
-    
-    for card_data in card_database[:50]:
-        if card_data.get("abilities"):
-            try:
-                card = CardFactory.from_json(card_data)
-                cards_with_abilities.append(card)
-            except Exception:
-                continue
-    
-    assert len(cards_with_abilities) > 0
-    
-    for card in cards_with_abilities[:10]:  # Test first 10 cards with abilities
-        assert len(card.abilities) > 0
-        
-        for ability in card.abilities:
-            # Name might be empty for some abilities (like keyword abilities)
-            assert ability.name is not None
-            # Effect or full_text should have content
-            assert ability.effect or ability.full_text
-            assert ability.type
-            
-            # Ability should have valid type
-            assert ability.type.value in ["keyword", "triggered", "static", "activated"]
+# test_card_abilities_parsing removed - abilities are now handled by composable system
 
 
 def _create_random_legal_deck(card_database, deck_name="Random Deck", max_attempts=100):

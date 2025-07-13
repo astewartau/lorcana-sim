@@ -10,9 +10,11 @@ from src.lorcana_sim.models.cards.character_card import CharacterCard
 from src.lorcana_sim.models.cards.action_card import ActionCard
 from src.lorcana_sim.models.cards.item_card import ItemCard
 from src.lorcana_sim.models.cards.base_card import Card, CardColor, Rarity
-from src.lorcana_sim.models.abilities.base_ability import Ability, AbilityType
+# NOTE: Old ability system removed - commenting out old import
+# from src.lorcana_sim.models.abilities.base_ability import Ability, AbilityType
 from src.lorcana_sim.engine.move_validator import MoveValidator
 from src.lorcana_sim.engine.game_engine import GameEngine
+from src.lorcana_sim.engine.action_result import ActionResult
 
 
 @pytest.fixture
@@ -149,9 +151,13 @@ class TestGameState:
         game_state.advance_phase()
         assert game_state.current_phase == Phase.SET
         
-        # Advance to MAIN
+        # Advance to DRAW
         game_state.advance_phase()
-        assert game_state.current_phase == Phase.MAIN
+        assert game_state.current_phase == Phase.DRAW
+        
+        # Advance to PLAY
+        game_state.advance_phase()
+        assert game_state.current_phase == Phase.PLAY
         
         # Advance should end turn and go back to READY for next player
         game_state.advance_phase()
@@ -163,16 +169,18 @@ class TestGameState:
         """Test turn number advancement."""
         # Complete player 1's turn
         game_state.advance_phase()  # READY -> SET
-        game_state.advance_phase()  # SET -> MAIN  
-        game_state.advance_phase()  # MAIN -> end turn, switch to player 2
+        game_state.advance_phase()  # SET -> DRAW
+        game_state.advance_phase()  # DRAW -> PLAY
+        game_state.advance_phase()  # PLAY -> end turn, switch to player 2
         
         assert game_state.current_player_index == 1
         assert game_state.turn_number == 1
         
         # Complete player 2's turn
         game_state.advance_phase()  # READY -> SET
-        game_state.advance_phase()  # SET -> MAIN
-        game_state.advance_phase()  # MAIN -> end turn, switch to player 1
+        game_state.advance_phase()  # SET -> DRAW
+        game_state.advance_phase()  # DRAW -> PLAY
+        game_state.advance_phase()  # PLAY -> end turn, switch to player 1
         
         assert game_state.current_player_index == 0
         assert game_state.turn_number == 2  # Now turn 2
@@ -180,14 +188,14 @@ class TestGameState:
     def test_game_over_condition(self, game_state):
         """Test game over conditions."""
         # Initially no one has won
-        is_over, winner = game_state.is_game_over()
-        assert not is_over
+        assert not game_state.is_game_over()
+        result, winner, reason = game_state.get_game_result()
         assert winner is None
         
         # Give player 1 enough lore to win
         game_state.current_player.lore = 20
-        is_over, winner = game_state.is_game_over()
-        assert is_over
+        assert game_state.is_game_over()
+        result, winner, reason = game_state.get_game_result()
         assert winner == game_state.current_player
     
     def test_can_play_ink(self, game_state):
@@ -196,40 +204,51 @@ class TestGameState:
         assert game_state.current_phase == Phase.READY
         assert not game_state.can_play_ink()
         
-        # Can play ink in SET phase
-        game_state.current_phase = Phase.SET
+        # Can play ink in PLAY phase
+        game_state.current_phase = Phase.PLAY
         assert game_state.can_play_ink()
         
         # Can't play ink after already playing ink
         game_state.ink_played_this_turn = True
         assert not game_state.can_play_ink()
         
-        # Can't play ink in MAIN phase
+        # Can't play ink in other phases
         game_state.ink_played_this_turn = False
-        game_state.current_phase = Phase.MAIN
+        game_state.current_phase = Phase.SET
         assert not game_state.can_play_ink()
     
     def test_can_perform_action(self, game_state):
         """Test action validation by phase."""
-        # READY phase - only pass turn
+        # READY phase - progress and pass turn
         assert game_state.current_phase == Phase.READY
+        assert game_state.can_perform_action(GameAction.PROGRESS)
         assert game_state.can_perform_action(GameAction.PASS_TURN)
         assert not game_state.can_perform_action(GameAction.PLAY_CHARACTER)
+        assert not game_state.can_perform_action(GameAction.PLAY_INK)
         
-        # SET phase - ink and pass turn
+        # SET phase - progress and pass turn
         game_state.current_phase = Phase.SET
-        assert game_state.can_perform_action(GameAction.PLAY_INK)
+        assert game_state.can_perform_action(GameAction.PROGRESS)
         assert game_state.can_perform_action(GameAction.PASS_TURN)
         assert not game_state.can_perform_action(GameAction.PLAY_CHARACTER)
+        assert not game_state.can_perform_action(GameAction.PLAY_INK)
         
-        # MAIN phase - most actions
-        game_state.current_phase = Phase.MAIN
+        # DRAW phase - progress and pass turn
+        game_state.current_phase = Phase.DRAW
+        assert game_state.can_perform_action(GameAction.PROGRESS)
+        assert game_state.can_perform_action(GameAction.PASS_TURN)
+        assert not game_state.can_perform_action(GameAction.PLAY_CHARACTER)
+        assert not game_state.can_perform_action(GameAction.PLAY_INK)
+        
+        # PLAY phase - most actions
+        game_state.current_phase = Phase.PLAY
         assert game_state.can_perform_action(GameAction.PLAY_CHARACTER)
         assert game_state.can_perform_action(GameAction.PLAY_ACTION)
         assert game_state.can_perform_action(GameAction.QUEST_CHARACTER)
         assert game_state.can_perform_action(GameAction.CHALLENGE_CHARACTER)
+        assert game_state.can_perform_action(GameAction.PLAY_INK)
+        assert game_state.can_perform_action(GameAction.PROGRESS)
         assert game_state.can_perform_action(GameAction.PASS_TURN)
-        assert not game_state.can_perform_action(GameAction.PLAY_INK)
 
 
 class TestPlayer:
@@ -402,6 +421,7 @@ class TestMoveValidator:
         game_state.current_phase = Phase.READY
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
+        assert GameAction.PROGRESS in action_types
         assert GameAction.PASS_TURN in action_types
         assert GameAction.PLAY_INK not in action_types
         
@@ -409,16 +429,27 @@ class TestMoveValidator:
         game_state.current_phase = Phase.SET
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
+        assert GameAction.PROGRESS in action_types
         assert GameAction.PASS_TURN in action_types
-        assert GameAction.PLAY_INK in action_types
+        assert GameAction.PLAY_INK not in action_types
         
-        # MAIN phase - give player enough ink to play cards
-        game_state.current_phase = Phase.MAIN
+        # DRAW phase
+        game_state.current_phase = Phase.DRAW
+        actions = validator.get_all_legal_actions()
+        action_types = [action for action, _ in actions]
+        assert GameAction.PROGRESS in action_types
+        assert GameAction.PASS_TURN in action_types
+        assert GameAction.PLAY_INK not in action_types
+        
+        # PLAY phase - give player enough ink to play cards
+        game_state.current_phase = Phase.PLAY
         game_state.current_player.inkwell = [game_state.current_player.hand[0]] * 5  # Enough ink
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
+        assert GameAction.PROGRESS in action_types
         assert GameAction.PASS_TURN in action_types
         assert GameAction.PLAY_CHARACTER in action_types
+        assert GameAction.PLAY_INK in action_types
 
 
 class TestGameEngine:
@@ -433,35 +464,35 @@ class TestGameEngine:
     def test_execute_play_ink(self, game_state, mock_character):
         """Test executing play ink action."""
         engine = GameEngine(game_state)
-        game_state.current_phase = Phase.SET
+        game_state.current_phase = Phase.PLAY
         
         # Should succeed
-        success, message = engine.execute_action(
+        result = engine.execute_action(
             GameAction.PLAY_INK,
             {'card': mock_character}
         )
         
-        assert success
-        assert "ink" in message.lower()
+        assert result.success
+        assert result.action_type == GameAction.PLAY_INK
         assert game_state.ink_played_this_turn
         assert mock_character in game_state.current_player.inkwell
     
     def test_execute_play_character(self, game_state, mock_character):
         """Test executing play character action."""
         engine = GameEngine(game_state)
-        game_state.current_phase = Phase.MAIN
+        game_state.current_phase = Phase.PLAY
         
         # Give player enough ink
         game_state.current_player.inkwell = [mock_character] * 3
         
         # Should succeed
-        success, message = engine.execute_action(
+        result = engine.execute_action(
             GameAction.PLAY_CHARACTER,
             {'card': mock_character}
         )
         
-        assert success
-        assert "character" in message.lower()
+        assert result.success
+        assert result.action_type == GameAction.PLAY_CHARACTER
         assert mock_character in game_state.current_player.characters_in_play
     
     def test_execute_invalid_action(self, game_state, mock_character):
@@ -469,10 +500,10 @@ class TestGameEngine:
         engine = GameEngine(game_state)
         game_state.current_phase = Phase.READY  # Can't play characters in ready phase
         
-        success, message = engine.execute_action(
+        result = engine.execute_action(
             GameAction.PLAY_CHARACTER,
             {'card': mock_character}
         )
         
-        assert not success
-        assert "not legal" in message.lower()
+        assert not result.success
+        assert result.error_message is not None

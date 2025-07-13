@@ -9,6 +9,7 @@ from ..models.cards.base_card import Card
 from .move_validator import MoveValidator
 from .event_system import GameEventManager, GameEvent, EventContext
 from .damage_calculator import DamageCalculator, DamageType
+from .action_result import ActionResult, ActionResultType
 
 
 class GameEngine:
@@ -37,7 +38,12 @@ class GameEngine:
         return card
     
     def _execute_set_step(self) -> None:
-        """Execute the set step (draw card with events)."""
+        """Execute the set step (resolve start-of-turn effects)."""
+        # Handle any start-of-turn triggered abilities
+        self.game_state.set_step()
+    
+    def _execute_draw_step(self) -> None:
+        """Execute the draw step (draw card with events)."""
         current_player = self.game_state.current_player
         
         # Draw card (skip on first turn for first player)
@@ -49,13 +55,30 @@ class GameEngine:
             self.draw_card_with_events(current_player)
         elif self.game_state.turn_number == 1 and self.game_state.current_player_index == 0:
             self.game_state.first_turn_draw_skipped = True
+        
+        # Don't call draw_step() - we already drew the card with events above
     
-    def execute_action(self, action: GameAction, parameters: Dict[str, Any]) -> Tuple[bool, str]:
+    def execute_action(self, action, parameters: Dict[str, Any]) -> ActionResult:
         """Execute a game action and update state."""
+        # Convert string actions to GameAction enum if needed
+        if isinstance(action, str):
+            try:
+                action = GameAction(action)
+            except ValueError:
+                return ActionResult.failure_result(action, f"Unknown action: {action}")
+        
+        # Check if game is over
+        if self.game_state.is_game_over():
+            result, winner, reason = self.game_state.get_game_result()
+            return ActionResult.failure_result(action, f"Game is over: {reason}")
+        
         # Validate action first
         is_valid, message = self.validator.validate_action(action, parameters)
         if not is_valid:
-            return False, message
+            return ActionResult.failure_result(action, message)
+        
+        # Record action for stalemate detection
+        self.game_state.record_action(action)
         
         # Execute the action
         try:
@@ -73,15 +96,17 @@ class GameEngine:
                 return self._execute_challenge(parameters['attacker'], parameters['defender'])
             elif action == GameAction.SING_SONG:
                 return self._execute_sing_song(parameters['song'], parameters['singer'])
+            elif action == GameAction.PROGRESS:
+                return self._execute_progress()
             elif action == GameAction.PASS_TURN:
                 return self._execute_pass_turn()
             else:
-                return False, f"Unknown action: {action}"
+                return ActionResult.failure_result(action, f"Unknown action: {action}")
         
         except Exception as e:
-            return False, f"Error executing action: {str(e)}"
+            return ActionResult.failure_result(action, f"Error executing action: {str(e)}")
     
-    def _execute_play_ink(self, card: Card) -> Tuple[bool, str]:
+    def _execute_play_ink(self, card: Card) -> ActionResult:
         """Execute playing a card as ink."""
         current_player = self.game_state.current_player
         
@@ -98,15 +123,19 @@ class GameEngine:
             )
             trigger_results = self.event_manager.trigger_event(ink_context)
             
-            result_message = f"Played {card.name} as ink"
-            if trigger_results:
-                result_message += f" (Triggered: {'; '.join(trigger_results)})"
-            
-            return True, result_message
+            return ActionResult.success_result(
+                action_type=GameAction.PLAY_INK,
+                result_type=ActionResultType.INK_PLAYED,
+                card=card,
+                player=current_player,
+                ink_after=current_player.available_ink,
+                total_ink=current_player.total_ink,
+                triggered_abilities=trigger_results or []
+            )
         
-        return False, "Failed to play ink"
+        return ActionResult.failure_result(GameAction.PLAY_INK, "Failed to play ink")
     
-    def _execute_play_character(self, character: CharacterCard) -> Tuple[bool, str]:
+    def _execute_play_character(self, character: CharacterCard) -> ActionResult:
         """Execute playing a character card."""
         current_player = self.game_state.current_player
         
@@ -115,11 +144,16 @@ class GameEngine:
             
             # Set turn_played for ink drying system
             character.turn_played = self.game_state.turn_number
+            character.is_dry = False  # Character has wet ink when just played
             
             # Register any triggered abilities this character has
             for ability in character.abilities:
                 if hasattr(ability, 'get_trigger_events') and ability.get_trigger_events():
                     self.event_manager.register_triggered_ability(ability)
+            
+            # Register composable abilities this character has
+            for ability in character.composable_abilities:
+                self.event_manager.register_composable_ability(ability)
             
             # Trigger CHARACTER_ENTERS_PLAY event (more general)
             enters_context = EventContext(
@@ -141,15 +175,19 @@ class GameEngine:
             if played_results:
                 trigger_results.extend(played_results)
             
-            result_message = f"Played character {character.name}"
-            if trigger_results:
-                result_message += f" (Triggered: {'; '.join(trigger_results)})"
-            
-            return True, result_message
+            return ActionResult.success_result(
+                action_type=GameAction.PLAY_CHARACTER,
+                result_type=ActionResultType.CHARACTER_PLAYED,
+                character=character,
+                player=current_player,
+                ink_after=current_player.available_ink,
+                total_ink=current_player.total_ink,
+                triggered_abilities=trigger_results or []
+            )
         
-        return False, "Failed to play character"
+        return ActionResult.failure_result(GameAction.PLAY_CHARACTER, "Failed to play character")
     
-    def _execute_play_action(self, action: ActionCard) -> Tuple[bool, str]:
+    def _execute_play_action(self, action: ActionCard) -> ActionResult:
         """Execute playing an action card."""
         current_player = self.game_state.current_player
         
@@ -177,16 +215,19 @@ class GameEngine:
                 if song_results:
                     trigger_results.extend(song_results)
             
-            # TODO: Execute action's effects
-            result_message = f"Played action {action.name}"
-            if trigger_results:
-                result_message += f" (Triggered: {'; '.join(trigger_results)})"
-            
-            return True, result_message
+            return ActionResult.success_result(
+                action_type=GameAction.PLAY_ACTION,
+                result_type=ActionResultType.ACTION_PLAYED,
+                action=action,
+                player=current_player,
+                ink_after=current_player.available_ink,
+                total_ink=current_player.total_ink,
+                triggered_abilities=trigger_results or []
+            )
         
-        return False, "Failed to play action"
+        return ActionResult.failure_result(GameAction.PLAY_ACTION, "Failed to play action")
     
-    def _execute_play_item(self, item: ItemCard) -> Tuple[bool, str]:
+    def _execute_play_item(self, item: ItemCard) -> ActionResult:
         """Execute playing an item card."""
         current_player = self.game_state.current_player
         
@@ -202,15 +243,19 @@ class GameEngine:
             )
             trigger_results = self.event_manager.trigger_event(item_context)
             
-            result_message = f"Played item {item.name}"
-            if trigger_results:
-                result_message += f" (Triggered: {'; '.join(trigger_results)})"
-            
-            return True, result_message
+            return ActionResult.success_result(
+                action_type=GameAction.PLAY_ITEM,
+                result_type=ActionResultType.ITEM_PLAYED,
+                item=item,
+                player=current_player,
+                ink_after=current_player.available_ink,
+                total_ink=current_player.total_ink,
+                triggered_abilities=trigger_results or []
+            )
         
-        return False, "Failed to play item"
+        return ActionResult.failure_result(GameAction.PLAY_ITEM, "Failed to play item")
     
-    def _execute_quest_character(self, character: CharacterCard) -> Tuple[bool, str]:
+    def _execute_quest_character(self, character: CharacterCard) -> ActionResult:
         """Execute questing with a character."""
         if character.can_quest(self.game_state.turn_number):
             character.exert()
@@ -226,7 +271,9 @@ class GameEngine:
             trigger_results = self.event_manager.trigger_event(event_context)
             
             # Calculate lore after abilities have had a chance to modify it
-            lore_gained = getattr(character, 'temporary_lore_bonus', 0) + character.current_lore
+            # current_lore already includes all bonuses from abilities
+            lore_gained = character.current_lore
+            lore_before = current_player.lore
             current_player.gain_lore(lore_gained)
             
             # Trigger LORE_GAINED event
@@ -247,18 +294,23 @@ class GameEngine:
             
             self.game_state.actions_this_turn.append(GameAction.QUEST_CHARACTER)
             
-            result_message = f"{character.name} quested for {lore_gained} lore"
-            if trigger_results:
-                result_message += f" (Triggered: {'; '.join(trigger_results)})"
-            
-            return True, result_message
+            return ActionResult.success_result(
+                action_type=GameAction.QUEST_CHARACTER,
+                result_type=ActionResultType.CHARACTER_QUESTED,
+                character=character,
+                player=current_player,
+                lore_gained=lore_gained,
+                lore_before=lore_before,
+                lore_after=current_player.lore,
+                triggered_abilities=trigger_results or []
+            )
         
-        return False, "Character cannot quest"
+        return ActionResult.failure_result(GameAction.QUEST_CHARACTER, "Character cannot quest")
     
-    def _execute_challenge(self, attacker: CharacterCard, defender: CharacterCard) -> Tuple[bool, str]:
+    def _execute_challenge(self, attacker: CharacterCard, defender: CharacterCard) -> ActionResult:
         """Execute a challenge between characters."""
         if not self.validator.can_challenge(attacker, defender):
-            return False, "Invalid challenge"
+            return ActionResult.failure_result(GameAction.CHALLENGE_CHARACTER, "Invalid challenge")
         
         # Exert attacker
         attacker.exert()
@@ -274,55 +326,63 @@ class GameEngine:
         )
         trigger_results = self.event_manager.trigger_event(event_context)
         
-        # Deal damage using the new damage calculation system
-        attacker_damage_taken = attacker.deal_damage(
-            defender.current_strength, 
-            source=defender, 
-            damage_calculator=self.damage_calculator,
-            damage_type=DamageType.CHALLENGE
-        )
-        
-        defender_damage_taken = defender.deal_damage(
-            attacker.current_strength, 
-            source=attacker, 
-            damage_calculator=self.damage_calculator,
-            damage_type=DamageType.CHALLENGE
-        )
-        
-        # Trigger damage events with actual damage taken
-        if defender_damage_taken > 0:
-            damage_context = EventContext(
+        # Calculate damage to defender with ability modifications
+        defender_base_damage = attacker.current_strength
+        if defender_base_damage > 0:
+            # Trigger CHARACTER_TAKES_DAMAGE event BEFORE dealing damage (for Resist, etc.)
+            defender_damage_context = EventContext(
                 event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
                 source=attacker,
                 target=defender,
                 player=current_player,
                 game_state=self.game_state,
                 additional_data={
-                    'damage': defender_damage_taken,
-                    'base_damage': attacker.current_strength,
+                    'damage': defender_base_damage,
+                    'base_damage': defender_base_damage,
                     'damage_type': DamageType.CHALLENGE
                 }
             )
-            self.event_manager.trigger_event(damage_context)
+            self.event_manager.trigger_event(defender_damage_context)
+            
+            # Get the modified damage from the event context
+            final_defender_damage = defender_damage_context.additional_data.get('damage', defender_base_damage)
+            
+            # Apply the damage (bypassing damage calculator since we already calculated it via events)
+            defender.damage += final_defender_damage
+            defender_damage_taken = final_defender_damage
+        else:
+            defender_damage_taken = 0
         
-        if attacker_damage_taken > 0:
-            damage_context = EventContext(
+        # Calculate damage to attacker with ability modifications
+        attacker_base_damage = defender.current_strength
+        if attacker_base_damage > 0:
+            # Trigger CHARACTER_TAKES_DAMAGE event BEFORE dealing damage (for Resist, etc.)
+            attacker_damage_context = EventContext(
                 event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
                 source=defender,
                 target=attacker,
                 player=self.game_state.opponent,
                 game_state=self.game_state,
                 additional_data={
-                    'damage': attacker_damage_taken,
-                    'base_damage': defender.current_strength,
+                    'damage': attacker_base_damage,
+                    'base_damage': attacker_base_damage,
                     'damage_type': DamageType.CHALLENGE
                 }
             )
-            self.event_manager.trigger_event(damage_context)
+            self.event_manager.trigger_event(attacker_damage_context)
+            
+            # Get the modified damage from the event context
+            final_attacker_damage = attacker_damage_context.additional_data.get('damage', attacker_base_damage)
+            
+            # Apply the damage (bypassing damage calculator since we already calculated it via events)
+            attacker.damage += final_attacker_damage
+            attacker_damage_taken = final_attacker_damage
+        else:
+            attacker_damage_taken = 0
         
         # Remove banished characters and trigger banishment events
         opponent = self.game_state.opponent
-        result_messages = []
+        banished_characters = []
         
         if not attacker.is_alive:
             # Trigger CHARACTER_LEAVES_PLAY event (more general)
@@ -349,7 +409,7 @@ class GameEngine:
                 game_state=self.game_state
             )
             self.event_manager.trigger_event(banish_context)
-            result_messages.append(f"{attacker.name} was banished")
+            banished_characters.append(attacker.name)
         
         if not defender.is_alive:
             # Trigger CHARACTER_LEAVES_PLAY event (more general)
@@ -376,19 +436,23 @@ class GameEngine:
                 game_state=self.game_state
             )
             self.event_manager.trigger_event(banish_context)
-            result_messages.append(f"{defender.name} was banished")
+            banished_characters.append(defender.name)
         
         self.game_state.actions_this_turn.append(GameAction.CHALLENGE_CHARACTER)
         
-        base_message = f"{attacker.name} challenged {defender.name}"
-        if result_messages:
-            base_message += f" ({'; '.join(result_messages)})"
-        if trigger_results:
-            base_message += f" (Triggered: {'; '.join(trigger_results)})"
-        
-        return True, base_message
+        return ActionResult.success_result(
+            action_type=GameAction.CHALLENGE_CHARACTER,
+            result_type=ActionResultType.CHARACTER_CHALLENGED,
+            attacker=attacker,
+            defender=defender,
+            player=current_player,
+            attacker_damage_taken=attacker_damage_taken,
+            defender_damage_taken=defender_damage_taken,
+            banished_characters=banished_characters,
+            triggered_abilities=trigger_results or []
+        )
     
-    def _execute_sing_song(self, song: ActionCard, singer: CharacterCard) -> Tuple[bool, str]:
+    def _execute_sing_song(self, song: ActionCard, singer: CharacterCard) -> ActionResult:
         """Execute singing a song."""
         current_player = self.game_state.current_player
         
@@ -406,36 +470,45 @@ class GameEngine:
                 source=singer,
                 target=song,
                 player=current_player,
-                game_state=self.game_state
+                game_state=self.game_state,
+                additional_data={'singer': singer, 'song': song}
             )
             trigger_results = self.event_manager.trigger_event(event_context)
             
             self.game_state.actions_this_turn.append(GameAction.SING_SONG)
             
-            result_message = f"{singer.name} sang {song.name}"
-            if trigger_results:
-                result_message += f" (Triggered: {'; '.join(trigger_results)})"
-            
-            return True, result_message
+            return ActionResult.success_result(
+                action_type=GameAction.SING_SONG,
+                result_type=ActionResultType.SONG_SUNG,
+                song=song,
+                singer=singer,
+                player=current_player,
+                triggered_abilities=trigger_results or []
+            )
         
-        return False, "Failed to sing song"
+        return ActionResult.failure_result(GameAction.SING_SONG, "Failed to sing song")
     
-    def _execute_pass_turn(self) -> Tuple[bool, str]:
-        """Execute passing the turn."""
+    def _execute_progress(self) -> ActionResult:
+        """Execute progressing to the next phase."""
         old_phase = self.game_state.current_phase
         current_player = self.game_state.current_player
         
-        if self.game_state.current_phase.value == 'main':
-            # Trigger PHASE_ENDS event
-            phase_end_context = EventContext(
-                event_type=GameEvent.PHASE_ENDS,
-                source=old_phase,
-                player=current_player,
-                game_state=self.game_state,
-                additional_data={'phase': old_phase.value}
-            )
-            self.event_manager.trigger_event(phase_end_context)
-            
+        # Capture hand/deck state before phase transition for draw detection
+        hand_before = len(current_player.hand)
+        deck_before = len(current_player.deck)
+        
+        # Trigger PHASE_ENDS event
+        phase_end_context = EventContext(
+            event_type=GameEvent.PHASE_ENDS,
+            source=old_phase,
+            player=current_player,
+            game_state=self.game_state,
+            additional_data={'phase': old_phase.value}
+        )
+        self.event_manager.trigger_event(phase_end_context)
+        
+        # If we're progressing from play phase, end the turn
+        if self.game_state.current_phase.value == 'play':
             # Trigger TURN_ENDS event
             turn_end_context = EventContext(
                 event_type=GameEvent.TURN_ENDS,
@@ -467,20 +540,17 @@ class GameEngine:
                     game_state=self.game_state
                 )
                 self.event_manager.trigger_event(ready_context)
-            
-            return True, "Turn ended"
+                
+                return ActionResult.success_result(
+                    action_type=GameAction.PROGRESS,
+                    result_type=ActionResultType.TURN_ENDED,
+                    old_player=current_player,
+                    new_player=new_player,
+                    turn_number=self.game_state.turn_number,
+                    new_phase=self.game_state.current_phase
+                )
         else:
-            # Trigger PHASE_ENDS event
-            phase_end_context = EventContext(
-                event_type=GameEvent.PHASE_ENDS,
-                source=old_phase,
-                player=current_player,
-                game_state=self.game_state,
-                additional_data={'phase': old_phase.value}
-            )
-            self.event_manager.trigger_event(phase_end_context)
-            
-            # Advance phase
+            # Advance phase within the same turn
             self.game_state.advance_phase()
             
             # Trigger PHASE_BEGINS event
@@ -494,7 +564,13 @@ class GameEngine:
             )
             self.event_manager.trigger_event(phase_begin_context)
             
-            # Trigger specific phase events
+            # Trigger specific phase events and execute phase logic
+            result_data = {
+                'old_phase': old_phase,
+                'new_phase': new_phase,
+                'player': current_player
+            }
+            
             if new_phase.value == 'set':
                 set_context = EventContext(
                     event_type=GameEvent.SET_STEP,
@@ -502,15 +578,96 @@ class GameEngine:
                     game_state=self.game_state
                 )
                 self.event_manager.trigger_event(set_context)
-                
-                # Execute set step logic (draw card with events)
                 self._execute_set_step()
-            elif new_phase.value == 'main':
-                main_context = EventContext(
+                
+            elif new_phase.value == 'draw':
+                draw_context = EventContext(
+                    event_type=GameEvent.DRAW_STEP,
+                    player=current_player,
+                    game_state=self.game_state
+                )
+                self.event_manager.trigger_event(draw_context)
+                self._execute_draw_step()
+                
+                # Check if cards were drawn
+                hand_after = len(current_player.hand)
+                deck_after = len(current_player.deck)
+                cards_drawn = hand_after - hand_before
+                
+                result_data.update({
+                    'card_drawn': cards_drawn > 0,
+                    'cards_drawn': cards_drawn,
+                    'hand_size': hand_after,
+                    'deck_size': deck_after,
+                    'first_player_first_turn': (self.game_state.turn_number == 1 and 
+                                              self.game_state.current_player_index == 0)
+                })
+                
+            elif new_phase.value == 'play':
+                play_context = EventContext(
                     event_type=GameEvent.MAIN_PHASE_BEGINS,
                     player=current_player,
                     game_state=self.game_state
                 )
-                self.event_manager.trigger_event(main_context)
+                self.event_manager.trigger_event(play_context)
             
-            return True, f"Advanced to {self.game_state.current_phase.value} phase"
+            return ActionResult.success_result(
+                action_type=GameAction.PROGRESS,
+                result_type=ActionResultType.PHASE_ADVANCED,
+                **result_data
+            )
+    
+    def _execute_pass_turn(self) -> ActionResult:
+        """Execute passing the turn to the opponent."""
+        old_phase = self.game_state.current_phase
+        current_player = self.game_state.current_player
+        
+        # Trigger PHASE_ENDS event
+        phase_end_context = EventContext(
+            event_type=GameEvent.PHASE_ENDS,
+            source=old_phase,
+            player=current_player,
+            game_state=self.game_state,
+            additional_data={'phase': old_phase.value}
+        )
+        self.event_manager.trigger_event(phase_end_context)
+        
+        # Trigger TURN_ENDS event
+        turn_end_context = EventContext(
+            event_type=GameEvent.TURN_ENDS,
+            player=current_player,
+            game_state=self.game_state,
+            additional_data={'turn_number': self.game_state.turn_number}
+        )
+        self.event_manager.trigger_event(turn_end_context)
+        
+        # End turn and start next player's turn
+        old_player_index = self.game_state.current_player_index
+        self.game_state.end_turn()
+        
+        # Trigger TURN_BEGINS for new player
+        new_player = self.game_state.current_player
+        turn_begin_context = EventContext(
+            event_type=GameEvent.TURN_BEGINS,
+            player=new_player,
+            game_state=self.game_state,
+            additional_data={'turn_number': self.game_state.turn_number}
+        )
+        self.event_manager.trigger_event(turn_begin_context)
+        
+        # Trigger READY_STEP event
+        ready_context = EventContext(
+            event_type=GameEvent.READY_STEP,
+            player=new_player,
+            game_state=self.game_state
+        )
+        self.event_manager.trigger_event(ready_context)
+        
+        return ActionResult.success_result(
+            action_type=GameAction.PASS_TURN,
+            result_type=ActionResultType.TURN_ENDED,
+            old_player=current_player,
+            new_player=new_player,
+            turn_number=self.game_state.turn_number,
+            new_phase=self.game_state.current_phase
+        )
