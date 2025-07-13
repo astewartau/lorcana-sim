@@ -156,25 +156,45 @@ class MoveValidator:
         return challenges
     
     def _get_valid_challenge_targets(self, attacker: CharacterCard, all_defenders: List[CharacterCard]) -> List[CharacterCard]:
-        """Get valid challenge targets considering abilities that modify targeting."""
-        valid_targets = []
+        """Get valid challenge targets considering abilities that modify targeting.
         
-        # Check if attacker has Evasive
+        This method filters defenders based on:
+        1. Basic challenge rules (must be exerted)
+        2. Evasive ability interactions
+        3. Bodyguard targeting enforcement
+        """
+        # Step 1: Filter for basic challengeable defenders (must be exerted and alive)
+        challengeable_defenders = [
+            defender for defender in all_defenders 
+            if defender.exerted and defender.is_alive
+        ]
+        
+        # Step 2: Apply Evasive filtering
+        valid_targets = []
         attacker_has_evasive = self._character_has_evasive(attacker)
         
-        for defender in all_defenders:
-            # Check if defender has Evasive
+        for defender in challengeable_defenders:
             if self._character_has_evasive(defender):
                 # Only attackers with Evasive can challenge Evasive defenders
                 if attacker_has_evasive:
                     valid_targets.append(defender)
-                # else: can't challenge this defender
             else:
                 # Non-Evasive defenders can be challenged by anyone
                 valid_targets.append(defender)
         
-        # TODO: Add Bodyguard redirection logic here
+        # Step 3: Apply Bodyguard targeting enforcement
+        # Check if there are any exerted Bodyguard characters among valid targets
+        bodyguard_targets = [
+            target for target in valid_targets 
+            if self._character_has_bodyguard(target)
+        ]
         
+        # If there are any Bodyguard characters that can be challenged, 
+        # ONLY they can be targeted
+        if bodyguard_targets:
+            return bodyguard_targets
+        
+        # Otherwise, return all valid targets
         return valid_targets
     
     def _character_has_evasive(self, character: CharacterCard) -> bool:
@@ -183,6 +203,20 @@ class MoveValidator:
             for ability in character.composable_abilities:
                 if hasattr(ability, 'name') and 'evasive' in ability.name.lower():
                     return True
+        return False
+    
+    def _character_has_bodyguard(self, character: CharacterCard) -> bool:
+        """Check if a character has Bodyguard ability."""
+        # Check metadata first (set by BodyguardEffect)
+        if hasattr(character, 'metadata') and character.metadata.get('has_bodyguard', False):
+            return True
+        
+        # Also check composable abilities as fallback
+        if hasattr(character, 'composable_abilities'):
+            for ability in character.composable_abilities:
+                if hasattr(ability, 'name') and 'bodyguard' in ability.name.lower():
+                    return True
+        
         return False
     
     def can_challenge(self, attacker: CharacterCard, defender: CharacterCard) -> bool:

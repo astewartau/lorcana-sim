@@ -108,10 +108,10 @@ def test_character_cannot_challenge_and_quest_same_turn():
     attacker.controller = player1
     defender.controller = player2
     
-    # Make characters ready and dry (can act)
+    # Make attacker ready and defender exerted (challengeable)
     attacker.exerted = False
     attacker.is_dry = True
-    defender.exerted = False
+    defender.exerted = True  # Defender must be exerted to be challengeable
     defender.is_dry = True
     
     # Put characters in play
@@ -411,7 +411,7 @@ def test_fix_prevents_double_action_bug():
     
     helga.exerted = False
     helga.is_dry = True
-    anna.exerted = False
+    anna.exerted = True  # Anna must be exerted to be challengeable
     anna.is_dry = True
     
     player1.characters_in_play = [helga]

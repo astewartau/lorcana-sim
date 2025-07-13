@@ -253,6 +253,85 @@ def print_board_state(game_state):
     print(f"   Turn {game_state.turn_number}, {current.name}'s {game_state.current_phase.value} phase")
 
 
+def analyze_lore_per_turn_rates(engine):
+    """Analyze lore generation rates for both players to determine strategic urgency."""
+    game_state = engine.game_state
+    current_player = game_state.current_player
+    opponent = game_state.players[1 - game_state.current_player_index]
+    
+    # Calculate potential lore per turn for both players
+    my_lore_rate = calculate_lore_rate(current_player)
+    opponent_lore_rate = calculate_lore_rate(opponent)
+    
+    # Calculate dangerous characters (for challenge targeting)
+    dangerous_characters = []
+    for character in opponent.characters_in_play:
+        if character.is_dry and character.current_lore >= 2:
+            dangerous_characters.append((character, character.current_lore))
+    
+    # Calculate turns until victory at current rates
+    my_lore = current_player.lore
+    opponent_lore = opponent.lore
+    lore_to_win = 20
+    
+    my_turns_to_win = float('inf') if my_lore_rate <= 0 else (lore_to_win - my_lore) / my_lore_rate
+    opponent_turns_to_win = float('inf') if opponent_lore_rate <= 0 else (lore_to_win - opponent_lore) / opponent_lore_rate
+    
+    return {
+        'my_lore_rate': my_lore_rate,
+        'opponent_lore_rate': opponent_lore_rate,
+        'my_turns_to_win': my_turns_to_win,
+        'opponent_turns_to_win': opponent_turns_to_win,
+        'pace_analysis': analyze_race_pace(my_turns_to_win, opponent_turns_to_win),
+        'dangerous_characters': dangerous_characters,
+        'opponent_next_turn_lore': opponent_lore_rate  # Immediate threat
+    }
+
+
+def calculate_lore_rate(player):
+    """Calculate average lore per turn for a player based on their board state."""
+    lore_per_turn = 0
+    
+    for character in player.characters_in_play:
+        # Only count characters that can consistently quest
+        if character.is_dry:  # Can act when it's their turn
+            char_lore = character.current_lore
+            
+            # Reduce expected lore for characters that might be challenged
+            # High-lore characters are more likely to be targeted
+            if char_lore >= 3:
+                # 70% chance to quest (might be challenged)
+                lore_per_turn += char_lore * 0.7
+            elif char_lore >= 2:
+                # 85% chance to quest
+                lore_per_turn += char_lore * 0.85
+            else:
+                # 95% chance to quest (low priority targets)
+                lore_per_turn += char_lore * 0.95
+    
+    return lore_per_turn
+
+
+def analyze_race_pace(my_turns, opponent_turns):
+    """Analyze the lore race pace and determine strategic stance."""
+    if my_turns == float('inf') and opponent_turns == float('inf'):
+        return 'stalemate'
+    elif my_turns == float('inf'):
+        return 'losing_badly'
+    elif opponent_turns == float('inf'):
+        return 'winning_easily'
+    elif my_turns <= opponent_turns - 1.5:
+        return 'winning_comfortably'
+    elif my_turns <= opponent_turns - 0.5:
+        return 'winning_slightly'
+    elif opponent_turns <= my_turns - 1.5:
+        return 'losing_badly'
+    elif opponent_turns <= my_turns - 0.5:
+        return 'losing_slightly'
+    else:
+        return 'tight_race'
+
+
 def analyze_board_threats(engine):
     """Analyze opponent's board and calculate potential lore gains."""
     game_state = engine.game_state
@@ -399,14 +478,19 @@ def choose_strategic_action(engine):
     # Analyze potential lore I can gain this turn
     my_potential_lore = sum(p['character'].current_lore for a, p in quest_actions)
     
-    # Analyze opponent's board threats
+    # NEW: Analyze lore-per-turn rates and strategic pace
+    pace_analysis = analyze_lore_per_turn_rates(engine)
+    
+    # Also analyze immediate threats (for backward compatibility)
     opponent_potential_lore, dangerous_characters = analyze_board_threats(engine)
     
     # Debug output for critical decisions
-    if my_lore >= 15 or opponent_lore >= 15:
-        print(f"   🔍 Analysis: Me {my_lore} lore, Opponent {opponent_lore} lore")
-        print(f"   🔍 Threats: Opponent could gain {opponent_potential_lore} lore next turn")
-        print(f"   🔍 My potential: {my_potential_lore} lore this turn")
+    if my_lore >= 15 or opponent_lore >= 15 or pace_analysis['pace_analysis'] in ['losing_badly', 'losing_slightly']:
+        print(f"   🔍 Lore Analysis: Me {my_lore} lore, Opponent {opponent_lore} lore")
+        print(f"   🔍 Lore Rates: Me {pace_analysis['my_lore_rate']:.1f}/turn, Opponent {pace_analysis['opponent_lore_rate']:.1f}/turn")
+        print(f"   🔍 Turns to Win: Me {pace_analysis['my_turns_to_win']:.1f}, Opponent {pace_analysis['opponent_turns_to_win']:.1f}")
+        print(f"   🔍 Race Pace: {pace_analysis['pace_analysis']}")
+        print(f"   🔍 My potential this turn: {my_potential_lore} lore")
     
     # PRIORITY 1: Can I win this turn by questing?
     if my_lore + my_potential_lore >= 20:
@@ -459,23 +543,77 @@ def choose_strategic_action(engine):
         # If no challenges available, still try to quest for the race
         print(f"   ⚡ Strategic: No challenges available, racing for lore (opponent could get {opponent_potential_lore} next turn)")
     
-    # PRIORITY 3: Evaluate board control vs lore race
+    # NEW PRIORITY 2.5: Strategic pace analysis - am I losing the race?
+    elif pace_analysis['pace_analysis'] in ['losing_badly', 'losing_slightly']:
+        # I'm losing the lore race - need to slow opponent down
+        pace_urgency = 'URGENT' if pace_analysis['pace_analysis'] == 'losing_badly' else 'Important'
+        print(f"   📊 {pace_urgency}: Losing lore race (opponent wins in {pace_analysis['opponent_turns_to_win']:.1f} turns vs my {pace_analysis['my_turns_to_win']:.1f})")
+        
+        if challenge_actions:
+            trades = evaluate_combat_trades(engine, challenge_actions)
+            # When losing race, prioritize slowing opponent over efficient trades
+            best_disruption_trade = None
+            for trade in trades:
+                # Accept trades that remove high-lore threats, even at moderate cost
+                if trade['defender_dies'] and trade['lore_prevented'] >= 2:
+                    if trade['trade_value'] >= -1:  # Accept small losses to disrupt opponent
+                        best_disruption_trade = trade
+                        break
+            
+            # If no good disruption available, look for any positive trade
+            if not best_disruption_trade:
+                for trade in trades:
+                    if trade['defender_dies'] and trade['trade_value'] >= 0:
+                        best_disruption_trade = trade
+                        break
+            
+            if best_disruption_trade:
+                defender_name = best_disruption_trade['params']['defender'].name
+                lore_prevented = best_disruption_trade['lore_prevented']
+                trade_value = best_disruption_trade['trade_value']
+                print(f"   ⚔️  Strategic: Disrupting opponent's lore engine - challenging {defender_name} (prevents {lore_prevented} lore, trade value: {trade_value})")
+                return best_disruption_trade['action'], best_disruption_trade['params']
+        
+        print(f"   📈 Strategic: No good disruption available, focusing on lore race")
+    
+    # PRIORITY 3: Strategic stance based on pace analysis
+    pace = pace_analysis['pace_analysis']
     lore_difference = my_lore - opponent_lore
     
-    # If I'm significantly behind in lore (5+), focus on questing
-    if lore_difference <= -5:
-        print(f"   📈 Strategic: Behind by {abs(lore_difference)} lore, focusing on questing")
-        if quest_actions:
-            return random.choice(quest_actions)
-    
-    # If I'm significantly ahead in lore (7+), I can afford to challenge for board control
-    elif lore_difference >= 7:
-        print(f"   🏰 Strategic: Ahead by {lore_difference} lore, maintaining board control")
+    # If I'm winning the race comfortably, I can afford board control
+    if pace in ['winning_comfortably', 'winning_easily']:
+        print(f"   🏰 Strategic: Winning race comfortably ({pace}), maintaining board control")
         if challenge_actions:
             trades = evaluate_combat_trades(engine, challenge_actions)
             if trades and trades[0]['trade_value'] > 0:  # Only if it's a good trade
                 best_trade = trades[0]
-                print(f"      → Taking good trade (value: {best_trade['trade_value']})")
+                print(f"      → Taking efficient trade (value: {best_trade['trade_value']})")
+                return best_trade['action'], best_trade['params']
+    
+    # If I'm slightly winning or in a tight race, be more conservative with challenges
+    elif pace in ['winning_slightly', 'tight_race']:
+        print(f"   ⚖️  Strategic: Close race ({pace}), selective challenging")
+        if challenge_actions:
+            trades = evaluate_combat_trades(engine, challenge_actions)
+            # Only take very good trades when race is tight
+            if trades and trades[0]['trade_value'] >= 1:  # Require good value
+                best_trade = trades[0]
+                print(f"      → Taking good trade in tight race (value: {best_trade['trade_value']})")
+                return best_trade['action'], best_trade['params']
+    
+    # Handle extreme lore differences that override pace analysis
+    if lore_difference <= -7:
+        print(f"   📈 Strategic: Far behind in lore ({lore_difference}), aggressive questing")
+        if quest_actions:
+            return random.choice(quest_actions)
+    
+    elif lore_difference >= 8:
+        print(f"   🏰 Strategic: Far ahead in lore ({lore_difference}), can afford trades")
+        if challenge_actions:
+            trades = evaluate_combat_trades(engine, challenge_actions)
+            if trades and trades[0]['trade_value'] >= -1:  # Accept small losses when far ahead
+                best_trade = trades[0]
+                print(f"      → Taking trade while ahead (value: {best_trade['trade_value']})")
                 return best_trade['action'], best_trade['params']
     
     # PRIORITY 4: Threat assessment - challenge dangerous characters
@@ -540,16 +678,16 @@ def simulate_random_game():
     game_state = setup_game()
     engine = GameEngine(game_state)
     
-    turn_count = 0
-    max_turns = 200  # Safety limit
+    action_count = 0
+    max_actions = 1000  # Safety limit (roughly 50-100 game turns)
     first_action = True  # Track if this is the first action
     
     print_board_state(game_state)
     print()
     print(f"⚪ {game_state.current_player.name} begins turn {game_state.turn_number} - Ready phase")
     
-    while turn_count < max_turns:
-        turn_count += 1
+    while action_count < max_actions:
+        action_count += 1
         current_player = game_state.current_player
         phase = game_state.current_phase
         
@@ -614,14 +752,14 @@ def simulate_random_game():
     ashley = game_state.players[0]
     tace = game_state.players[1]
     print(f"📊 Final Score: Ashley {ashley.lore} - {tace.lore} Tace")
-    print(f"🎮 Game completed in {turn_count} turns")
+    print(f"🎮 Game completed in {action_count} actions over {game_state.turn_number} turns")
     
     # Display final game result
     result, winner, reason = game_state.get_game_result()
     if result != GameResult.ONGOING:
         print(f"🏆 {reason}")
     else:
-        print("🏆 Game ended without completion (turn limit reached)")
+        print("🏆 Game ended without completion (action limit reached)")
 
 
 if __name__ == "__main__":
