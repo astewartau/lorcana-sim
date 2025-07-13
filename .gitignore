@@ -130,10 +130,3 @@ analyze_*.py
 detailed_pattern_analysis.py
 edge_case_analysis.py
 
-# Work-in-progress step system (not ready for commit)
-src/lorcana_sim/engine/game_loop.py
-src/lorcana_sim/engine/input_system.py
-src/lorcana_sim/engine/state_serializer.py
-src/lorcana_sim/engine/step_system.py
-src/lorcana_sim/engine/stepped_game_engine.py
-src/lorcana_sim/loaders/deck_loader.py
