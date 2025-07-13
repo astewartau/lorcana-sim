@@ -2,5 +2,7 @@
 
 from .move_validator import MoveValidator
 from .game_engine import GameEngine
+from .event_system import GameEventManager
+from .damage_calculator import DamageCalculator
 
-__all__ = ['MoveValidator', 'GameEngine']
+__all__ = ['MoveValidator', 'GameEngine', 'GameEventManager', 'DamageCalculator']
