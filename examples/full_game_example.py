@@ -227,7 +227,7 @@ def print_board_state(game_state):
             
             dmg = f"(-{char.damage})" if char.damage > 0 else ""
             abilities = get_ability_summary(char)
-            chars.append(f"{char.name}{abilities} {char.current_strength}/{char.current_willpower}{dmg} ({status_letter}) {status_icon}")
+            chars.append(f"{char.name}{abilities} {char.current_strength}/{char.current_willpower} ⭐{char.current_lore}{dmg} ({status_letter}) {status_icon}")
         print(f"     Characters: {', '.join(chars)}")
     
     print(f"   Tace: {tace.lore} lore, {tace.available_ink}/{tace.total_ink} ink")
@@ -247,7 +247,7 @@ def print_board_state(game_state):
             
             dmg = f"(-{char.damage})" if char.damage > 0 else ""
             abilities = get_ability_summary(char)
-            chars.append(f"{char.name}{abilities} {char.current_strength}/{char.current_willpower}{dmg} ({status_letter}) {status_icon}")
+            chars.append(f"{char.name}{abilities} {char.current_strength}/{char.current_willpower} ⭐{char.current_lore}{dmg} ({status_letter}) {status_icon}")
         print(f"     Characters: {', '.join(chars)}")
     
     print(f"   Turn {game_state.turn_number}, {current.name}'s {game_state.current_phase.value} phase")
