@@ -276,6 +276,25 @@ def analyze_board_threats(engine):
     return opponent_potential_lore, dangerous_characters
 
 
+def calculate_challenge_strength(character, is_challenging=False):
+    """Calculate effective strength for a character in combat, accounting for abilities."""
+    base_strength = character.current_strength
+    
+    # Add Challenger bonus if this character is challenging
+    if is_challenging and hasattr(character, 'composable_abilities'):
+        for ability in character.composable_abilities:
+            if hasattr(ability, 'name') and 'challenger' in ability.name.lower():
+                # Extract challenger value from name like "Challenger +3"
+                import re
+                match = re.search(r'\+(\d+)', ability.name)
+                if match:
+                    challenger_bonus = int(match.group(1))
+                    base_strength += challenger_bonus
+                    break
+    
+    return base_strength
+
+
 def evaluate_combat_trades(engine, challenge_actions):
     """Evaluate potential combat trades and find the most valuable ones."""
     trades = []
@@ -284,9 +303,17 @@ def evaluate_combat_trades(engine, challenge_actions):
         attacker = params['attacker']
         defender = params['defender']
         
-        # Simple combat calculation (not accounting for all abilities yet)
-        attacker_damage = defender.current_strength
-        defender_damage = attacker.current_strength
+        # Calculate combat strength accounting for challenge abilities
+        attacker_strength = calculate_challenge_strength(attacker, is_challenging=True)
+        defender_strength = calculate_challenge_strength(defender, is_challenging=False)
+        
+        # Debug output for Challenger calculations
+        if attacker_strength != attacker.current_strength or defender_strength != defender.current_strength:
+            print(f"      🔍 Combat: {attacker.name} ({attacker.current_strength}→{attacker_strength}) vs {defender.name} ({defender.current_strength}→{defender_strength})")
+        
+        # Damage calculation
+        attacker_damage = defender_strength  # Damage attacker takes from defender
+        defender_damage = attacker_strength  # Damage defender takes from attacker
         
         attacker_survives = attacker.current_willpower > attacker_damage
         defender_dies = defender.current_willpower <= defender_damage
