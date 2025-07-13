@@ -68,15 +68,8 @@ class ComposableListener:
         if hasattr(self.trigger_condition, 'event_type'):
             return [self.trigger_condition.event_type]
         
-        # Conservative fallback - return common events only
-        from ...engine.event_system import GameEvent
-        return [
-            GameEvent.CHARACTER_ENTERS_PLAY,
-            GameEvent.CHARACTER_QUESTS,
-            GameEvent.CHARACTER_CHALLENGES,
-            GameEvent.CHARACTER_TAKES_DAMAGE,
-            GameEvent.SONG_SUNG
-        ]
+        # Conservative fallback - return empty list to avoid spurious triggers
+        return []
     
     def __str__(self) -> str:
         name_part = f"{self.name}: " if self.name else ""

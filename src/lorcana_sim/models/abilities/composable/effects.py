@@ -319,3 +319,240 @@ BANISH = BanishCharacter()
 RETURN_TO_HAND = ReturnToHand()
 PREVENT_TARGETING = PreventEffect("targeting")
 NO_EFFECT = NoEffect()
+
+
+# =============================================================================
+# ADDITIONAL EFFECTS FOR ADVANCED ABILITIES
+# =============================================================================
+
+class ShiftEffect(Effect):
+    """Play a character for reduced cost by discarding another character (Shift)."""
+    
+    def __init__(self, cost_reduction: int = 0):
+        self.cost_reduction = cost_reduction
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # This is a play-time effect that modifies how the character can be played
+        # The actual cost reduction logic would be handled in the game engine
+        if hasattr(target, 'metadata'):
+            target.metadata['shift_cost_reduction'] = self.cost_reduction
+        else:
+            target.metadata = {'shift_cost_reduction': self.cost_reduction}
+        return target
+    
+    def __str__(self) -> str:
+        if self.cost_reduction > 0:
+            return f"shift (reduce cost by {self.cost_reduction})"
+        return "shift"
+
+
+class ChallengerEffect(Effect):
+    """Grant +X strength while challenging (Challenger +X)."""
+    
+    def __init__(self, strength_bonus: int):
+        self.strength_bonus = strength_bonus
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Apply temporary strength bonus during challenge
+        if hasattr(target, 'add_strength_bonus'):
+            target.add_strength_bonus(self.strength_bonus, "this_challenge")
+        return target
+    
+    def __str__(self) -> str:
+        return f"challenger +{self.strength_bonus}"
+
+
+class VanishEffect(Effect):
+    """Banish this character when opponent chooses it for an action (Vanish)."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Banish the character immediately when targeted by opponent
+        if hasattr(target, 'banish'):
+            # Use the banish method if available (for mock characters in tests)
+            target.banish()
+        else:
+            # For real characters, set the banished metadata
+            if hasattr(target, 'metadata'):
+                target.metadata['banished'] = True
+            else:
+                target.metadata = {'banished': True}
+        return target
+    
+    def __str__(self) -> str:
+        return "vanish (banish when targeted by opponent)"
+
+
+class RecklessEffect(Effect):
+    """Prevent questing and force challenging (Reckless)."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Mark character as unable to quest and must challenge
+        if hasattr(target, 'metadata'):
+            target.metadata['cannot_quest'] = True
+            target.metadata['must_challenge_if_able'] = True
+        else:
+            target.metadata = {'cannot_quest': True, 'must_challenge_if_able': True}
+        return target
+    
+    def __str__(self) -> str:
+        return "reckless (can't quest, must challenge if able)"
+
+
+class SingTogetherEffect(Effect):
+    """Exert multiple characters to sing for free (Sing Together X)."""
+    
+    def __init__(self, required_cost: int):
+        self.required_cost = required_cost
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        event_context = context.get('event_context')
+        if event_context and event_context.additional_data:
+            # Mark that this character can participate in sing together
+            event_context.additional_data['sing_together_required_cost'] = self.required_cost
+            event_context.additional_data['can_sing_together'] = True
+        return target
+    
+    def __str__(self) -> str:
+        return f"sing together {self.required_cost}"
+
+
+class CostModification(Effect):
+    """Modify the cost of playing cards or abilities."""
+    
+    def __init__(self, cost_change: int, target_type: str = "all"):
+        self.cost_change = cost_change  # Negative for cost reduction
+        self.target_type = target_type  # "all", "characters", "actions", "items"
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # This effect typically applies to the player's hand or game state
+        # Implementation would depend on how cost modifications are tracked
+        event_context = context.get('event_context')
+        if event_context and event_context.additional_data:
+            event_context.additional_data[f'cost_modification_{self.target_type}'] = self.cost_change
+        return target
+    
+    def __str__(self) -> str:
+        sign = "+" if self.cost_change >= 0 else ""
+        return f"modify {self.target_type} cost by {sign}{self.cost_change}"
+
+
+class ExertCharacter(Effect):
+    """Exert a character."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if hasattr(target, 'exerted'):
+            target.exerted = True
+        return target
+    
+    def __str__(self) -> str:
+        return "exert character"
+
+
+class ReadyCharacter(Effect):
+    """Ready (un-exert) a character."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if hasattr(target, 'exerted'):
+            target.exerted = False
+        return target
+    
+    def __str__(self) -> str:
+        return "ready character"
+
+
+class PlayCardFromDiscard(Effect):
+    """Play a card from discard pile."""
+    
+    def __init__(self, card_filter: Optional[Callable] = None):
+        self.card_filter = card_filter
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Implementation would involve game state manipulation
+        # This is a placeholder for the effect
+        game_state = context.get('game_state')
+        player = context.get('player') or getattr(target, 'controller', None)
+        if game_state and player:
+            # Mark that player can play from discard
+            if not hasattr(player, 'temporary_effects'):
+                player.temporary_effects = []
+            player.temporary_effects.append(('play_from_discard', self.card_filter))
+        return target
+    
+    def __str__(self) -> str:
+        return "play card from discard"
+
+
+class SearchLibrary(Effect):
+    """Search library for cards."""
+    
+    def __init__(self, count: int = 1, card_filter: Optional[Callable] = None, 
+                 reveal: bool = False, shuffle_after: bool = True):
+        self.count = count
+        self.card_filter = card_filter
+        self.reveal = reveal
+        self.shuffle_after = shuffle_after
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Implementation would involve deck manipulation
+        player = context.get('player') or getattr(target, 'controller', None)
+        if player and hasattr(player, 'deck'):
+            # Mark for later resolution by game engine
+            if not hasattr(player, 'pending_searches'):
+                player.pending_searches = []
+            player.pending_searches.append({
+                'count': self.count,
+                'filter': self.card_filter,
+                'reveal': self.reveal,
+                'shuffle': self.shuffle_after
+            })
+        return target
+    
+    def __str__(self) -> str:
+        return f"search library for {self.count} card{'s' if self.count != 1 else ''}"
+
+
+class BodyguardEffect(Effect):
+    """Allow entering play exerted and force targeting (Bodyguard)."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Mark character as having bodyguard
+        if hasattr(target, 'metadata'):
+            target.metadata['has_bodyguard'] = True
+            target.metadata['can_enter_exerted'] = True
+        else:
+            target.metadata = {'has_bodyguard': True, 'can_enter_exerted': True}
+        return target
+    
+    def __str__(self) -> str:
+        return "bodyguard"
+
+
+class SupportStrengthEffect(Effect):
+    """Add this character's strength to another character this turn (Support)."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Get the support character (the one with Support ability)
+        support_char = context.get('ability_owner')
+        if support_char and hasattr(support_char, 'current_strength'):
+            # Add support character's strength to target
+            if hasattr(target, 'add_strength_bonus'):
+                target.add_strength_bonus(support_char.current_strength, "this_turn")
+        return target
+    
+    def __str__(self) -> str:
+        return "add support character's strength"
+
+
+# Additional pre-built effects
+SHIFT = ShiftEffect()
+CHALLENGER_1 = ChallengerEffect(1)
+CHALLENGER_2 = ChallengerEffect(2) 
+CHALLENGER_3 = ChallengerEffect(3)
+VANISH = VanishEffect()
+RECKLESS = RecklessEffect()
+BODYGUARD = BodyguardEffect()
+SUPPORT_STRENGTH = SupportStrengthEffect()
+EXERT = ExertCharacter()
+READY = ReadyCharacter()
+SEARCH_1 = SearchLibrary(1)
+PLAY_FROM_DISCARD = PlayCardFromDiscard()

@@ -78,8 +78,21 @@ class GameEventManager:
     
     def register_composable_ability(self, ability: Any) -> None:
         """Register a composable ability with the event manager."""
-        # Get events this ability should listen to based on its keyword
-        relevant_events = self._get_relevant_events_for_ability(ability)
+        # For composable abilities, get events from the ability's listeners
+        if hasattr(ability, 'listeners'):
+            # Get all events that any listener in this ability cares about
+            relevant_events = set()
+            for listener in ability.listeners:
+                if hasattr(listener, 'relevant_events'):
+                    listener_events = listener.relevant_events()
+                    relevant_events.update(listener_events)
+                
+            # If no relevant events found, fall back to name-based detection
+            if not relevant_events:
+                relevant_events = set(self._get_relevant_events_for_ability(ability))
+        else:
+            # Fall back to old method for non-composable abilities
+            relevant_events = set(self._get_relevant_events_for_ability(ability))
         
         for event in relevant_events:
             if event not in self._composable_listeners:

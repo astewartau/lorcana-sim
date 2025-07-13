@@ -39,6 +39,10 @@ def when_event(event: GameEvent,
         
         return True
     
+    # Add event information to the condition function for introspection
+    condition.event_type = event
+    condition.get_relevant_events = lambda: [event]
+    
     return condition
 
 

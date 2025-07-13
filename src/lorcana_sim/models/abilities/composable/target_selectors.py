@@ -75,6 +75,12 @@ class SelfSelector(TargetSelector):
     """Select the ability's owner character."""
     
     def select(self, context: Dict[str, Any]) -> List[Any]:
+        # First try to get the ability owner (the character that has the ability)
+        ability_owner = context.get('ability_owner')
+        if ability_owner:
+            return [ability_owner]
+        
+        # Fallback to event source (for backward compatibility)
         source = context.get('source')
         if not source:
             event_context = context.get('event_context')

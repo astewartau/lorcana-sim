@@ -4,7 +4,10 @@ from typing import Any
 from .composable_ability import ComposableAbility, quick_ability
 from .effects import (
     StatModification, PreventEffect, ModifyDamage, ForceRetarget, 
-    ModifySongCost, GrantProperty, NoEffect, ConditionalEffect
+    ModifySongCost, GrantProperty, NoEffect, ConditionalEffect,
+    ShiftEffect, ChallengerEffect, VanishEffect, RecklessEffect,
+    SingTogetherEffect, CostModification, ExertCharacter, ReadyCharacter,
+    BodyguardEffect, SupportStrengthEffect
 )
 from .target_selectors import (
     SELF, NO_TARGET, EVENT_TARGET, EVENT_SOURCE, FRIENDLY_CHARACTER, OTHER_FRIENDLY, ENEMY_CHARACTER,
@@ -55,46 +58,22 @@ def create_ward_ability(character: Any) -> ComposableAbility:
 
 
 # =============================================================================
-# BODYGUARD ABILITY - Force challenge redirection
+# BODYGUARD ABILITY - May enter play exerted, must be challenged if able
 # =============================================================================
 
 def create_bodyguard_ability(character: Any) -> ComposableAbility:
-    """Bodyguard - Opponents must challenge this character if able.
+    """Bodyguard - This character may enter play exerted. An opposing character 
+    who challenges one of your characters must choose one with Bodyguard if able.
     
-    Implementation: When an opponent challenges another friendly character,
-    and this character is ready, redirect to this character.
+    Implementation: When this character enters play, mark it as having bodyguard.
+    The challenge targeting logic is handled by the game engine.
     """
-    def bodyguard_condition(event_context):
-        # Check if it's a challenge against a friendly character
-        if not when_event(GameEvent.CHARACTER_CHALLENGES)(event_context):
-            return False
-        
-        # Check if target is friendly to bodyguard
-        target = event_context.target
-        if not target or target.controller != character.controller:
-            return False
-        
-        # Check if target is not the bodyguard itself
-        if target == character:
-            return False
-        
-        # Check if bodyguard is ready
-        if character.exerted:
-            return False
-        
-        # Check if challenger is an opponent
-        challenger = event_context.source
-        if not challenger or challenger.controller == character.controller:
-            return False
-        
-        return True
-    
     return quick_ability(
         name="Bodyguard",
         character=character,
-        trigger_condition=bodyguard_condition,
-        target_selector=NO_TARGET,
-        effect=ForceRetarget()
+        trigger_condition=when_enters_play(character),
+        target_selector=SELF,
+        effect=BodyguardEffect()
     )
 
 
@@ -125,6 +104,9 @@ def create_evasive_ability(character: Any) -> ComposableAbility:
         
         return True  # Challenger doesn't have Evasive, prevent challenge
     
+    # Add event introspection
+    evasive_condition.get_relevant_events = lambda: [GameEvent.CHARACTER_CHALLENGES]
+    
     return quick_ability(
         name="Evasive",
         character=character,
@@ -149,6 +131,9 @@ def create_singer_ability(cost: int, character: Any) -> ComposableAbility:
         return (event_context.additional_data and 
                 event_context.additional_data.get('singer') == character)
     
+    # Add event introspection
+    singer_condition.get_relevant_events = lambda: [GameEvent.SONG_SUNG]
+    
     return quick_ability(
         name=f"Singer {cost}",
         character=character,
@@ -159,43 +144,32 @@ def create_singer_ability(cost: int, character: Any) -> ComposableAbility:
 
 
 # =============================================================================
-# SUPPORT ABILITY - When quests, give lore bonus to another character
+# SUPPORT ABILITY - When this character quests, add strength to another character
 # =============================================================================
 
-def create_support_ability(value: int, character: Any) -> ComposableAbility:
-    """Support X - When another friendly character quests, they get +X lore this turn.
+def create_support_ability(character: Any) -> ComposableAbility:
+    """Support - Whenever this character quests, you may add their Strength 
+    to another chosen character's Strength this turn.
     
-    Implementation: When any friendly character (other than this one) quests,
-    that character gets +X lore this turn.
+    Implementation: When this character quests, allow choosing another friendly
+    character to receive the strength bonus.
     """
     
     def support_condition(event_context):
-        """Trigger when any friendly character (except this one) quests."""
-        # Check if it's a quest event
-        if not when_event(GameEvent.CHARACTER_QUESTS)(event_context):
-            return False
-        
-        # Check if the questing character is friendly to the support character
-        questing_character = event_context.source
-        if not questing_character or not hasattr(questing_character, 'controller'):
-            return False
-        
-        if not hasattr(character, 'controller') or questing_character.controller != character.controller:
-            return False
-        
-        # Check if the questing character is NOT the support character itself
-        if questing_character == character:
-            return False
-        
-        return True
+        """Trigger when this character quests."""
+        return (when_event(GameEvent.CHARACTER_QUESTS)(event_context) and 
+                event_context.source == character)
     
-    # Target the character who is questing (the event source)
+    # Add event introspection
+    support_condition.get_relevant_events = lambda: [GameEvent.CHARACTER_QUESTS]
+    
+    # Target another friendly character (in full implementation, this would be chosen)
     return quick_ability(
-        name=f"Support {value}",
+        name="Support",
         character=character,
         trigger_condition=support_condition,
-        target_selector=EVENT_SOURCE,  # Target the questing character
-        effect=StatModification("lore", value, "this_turn")
+        target_selector=OTHER_FRIENDLY,  # Choose another friendly character
+        effect=SupportStrengthEffect()
     )
 
 
@@ -219,26 +193,182 @@ def create_rush_ability(character: Any) -> ComposableAbility:
 
 
 # =============================================================================
+# SHIFT ABILITIES - Play for reduced cost by discarding another character
+# =============================================================================
+
+def create_shift_ability(cost: int, character: Any) -> ComposableAbility:
+    """Shift X - You may pay X to play this character on top of another character named the same.
+    
+    Implementation: This is primarily a play-time effect, but we mark the character
+    with shift capability when it enters play.
+    """
+    return quick_ability(
+        name=f"Shift {cost}",
+        character=character,
+        trigger_condition=when_enters_play(character),
+        target_selector=SELF,
+        effect=ShiftEffect(cost)
+    )
+
+
+def create_puppy_shift_ability(cost: int, character: Any) -> ComposableAbility:
+    """Shift X - This character can shift onto any other character (not just same name).
+    
+    Implementation: Similar to regular shift but with broader targeting.
+    """
+    return quick_ability(
+        name=f"Shift {cost} (Puppy)",
+        character=character,
+        trigger_condition=when_enters_play(character),
+        target_selector=SELF,
+        effect=ShiftEffect(cost)  # The actual puppy logic is in play mechanics
+    )
+
+
+def create_universal_shift_ability(cost: int, character: Any) -> ComposableAbility:
+    """Shift X - This character can shift onto any character.
+    
+    Implementation: Universal shift allows shifting onto any character.
+    """
+    return quick_ability(
+        name=f"Shift {cost} (Universal)",
+        character=character,
+        trigger_condition=when_enters_play(character),
+        target_selector=SELF,
+        effect=ShiftEffect(cost)  # The actual universal logic is in play mechanics
+    )
+
+
+# =============================================================================
+# CHALLENGER ABILITY - Get +X strength while challenging
+# =============================================================================
+
+def create_challenger_ability(strength_bonus: int, character: Any) -> ComposableAbility:
+    """Challenger +X - While challenging, this character gets +X Strength.
+    
+    Implementation: When this character challenges, grant temporary strength bonus.
+    """
+    return quick_ability(
+        name=f"Challenger +{strength_bonus}",
+        character=character,
+        trigger_condition=when_challenges(character),
+        target_selector=SELF,
+        effect=ChallengerEffect(strength_bonus)
+    )
+
+
+# =============================================================================
+# RECKLESS ABILITY - Can't quest, must challenge if able
+# =============================================================================
+
+def create_reckless_ability(character: Any) -> ComposableAbility:
+    """Reckless - Characters with Reckless can't quest and must challenge if able.
+    
+    Implementation: When this character enters play, mark it as reckless.
+    The actual restriction logic is handled by the game engine.
+    """
+    return quick_ability(
+        name="Reckless",
+        character=character,
+        trigger_condition=when_enters_play(character),
+        target_selector=SELF,
+        effect=RecklessEffect()
+    )
+
+
+# =============================================================================
+# VANISH ABILITY - Banish when opponent chooses for an action
+# =============================================================================
+
+def create_vanish_ability(character: Any) -> ComposableAbility:
+    """Vanish - When an opponent chooses this character for an action, banish them.
+    
+    Implementation: When this character is targeted by an opponent action, banish it.
+    """
+    def vanish_condition(event_context):
+        # Check if this character is being targeted by an opponent
+        if event_context.target != character:
+            return False
+        
+        # Check if the source is an opponent
+        source = event_context.source
+        if source and hasattr(source, 'controller') and hasattr(character, 'controller'):
+            is_opponent = source.controller != character.controller
+            return is_opponent
+        
+        # If no clear source, check if it's an opponent's turn
+        game_state = event_context.game_state
+        if game_state and hasattr(game_state, 'current_player') and hasattr(character, 'controller'):
+            return game_state.current_player != character.controller
+        
+        return False
+    
+    # Add event introspection
+    vanish_condition.get_relevant_events = lambda: [GameEvent.CHARACTER_TAKES_DAMAGE]
+    
+    return quick_ability(
+        name="Vanish",
+        character=character,
+        trigger_condition=vanish_condition,
+        target_selector=SELF,
+        effect=VanishEffect()
+    )
+
+
+# =============================================================================
+# SING TOGETHER ABILITY - Multiple characters can sing together
+# =============================================================================
+
+def create_sing_together_ability(cost: int, character: Any) -> ComposableAbility:
+    """Sing Together X - Multiple characters can combine their Singer values to sing songs.
+    
+    Implementation: When singing a song, this character can contribute its Singer value.
+    """
+    def sing_together_condition(event_context):
+        return (when_event(GameEvent.SONG_SUNG)(event_context) and
+                event_context.additional_data and
+                event_context.additional_data.get('allow_multiple_singers', False))
+    
+    # Add event introspection
+    sing_together_condition.get_relevant_events = lambda: [GameEvent.SONG_SUNG]
+    
+    return quick_ability(
+        name=f"Sing Together {cost}",
+        character=character,
+        trigger_condition=sing_together_condition,
+        target_selector=SELF,
+        effect=SingTogetherEffect(cost)
+    )
+
+
+# =============================================================================
 # CONVENIENCE FUNCTIONS FOR ALL ABILITIES
 # =============================================================================
 
-def create_keyword_ability(keyword: str, character: Any, value: int = None) -> ComposableAbility:
+def create_keyword_ability(keyword: str, character: Any, value: int = None, target_name: str = None) -> ComposableAbility:
     """Create any keyword ability by name."""
     
     keyword_factories = {
-        'Resist': lambda char, val: create_resist_ability(val or 1, char),
-        'Ward': lambda char, val: create_ward_ability(char),
-        'Bodyguard': lambda char, val: create_bodyguard_ability(char),
-        'Evasive': lambda char, val: create_evasive_ability(char),
-        'Singer': lambda char, val: create_singer_ability(val or 4, char),
-        'Support': lambda char, val: create_support_ability(val or 1, char),
-        'Rush': lambda char, val: create_rush_ability(char),
+        'Resist': lambda char, val, tgt: create_resist_ability(val or 1, char),
+        'Ward': lambda char, val, tgt: create_ward_ability(char),
+        'Bodyguard': lambda char, val, tgt: create_bodyguard_ability(char),
+        'Evasive': lambda char, val, tgt: create_evasive_ability(char),
+        'Singer': lambda char, val, tgt: create_singer_ability(val or 4, char),
+        'Support': lambda char, val, tgt: create_support_ability(char),
+        'Rush': lambda char, val, tgt: create_rush_ability(char),
+        'Shift': lambda char, val, tgt: create_shift_ability(val or 0, char),
+        'Puppy Shift': lambda char, val, tgt: create_puppy_shift_ability(val or 0, char),
+        'Universal Shift': lambda char, val, tgt: create_universal_shift_ability(val or 0, char),
+        'Challenger': lambda char, val, tgt: create_challenger_ability(val or 1, char),
+        'Reckless': lambda char, val, tgt: create_reckless_ability(char),
+        'Vanish': lambda char, val, tgt: create_vanish_ability(char),
+        'Sing Together': lambda char, val, tgt: create_sing_together_ability(val or 1, char),
     }
     
     if keyword not in keyword_factories:
         raise ValueError(f"Unknown keyword ability: {keyword}")
     
-    return keyword_factories[keyword](character, value)
+    return keyword_factories[keyword](character, value, target_name)
 
 
 # =============================================================================
@@ -272,6 +402,9 @@ def create_scaling_ability_example(character: Any) -> ComposableAbility:
     """Example of an ability that scales with game state."""
     def scaling_condition(event_context):
         return when_quests(character)(event_context)
+    
+    # Add event introspection
+    scaling_condition.get_relevant_events = lambda: [GameEvent.CHARACTER_QUESTS]
     
     def scaling_effect_factory():
         def scaling_effect(target, context):
@@ -318,7 +451,11 @@ class ComposableKeywordRegistry:
     @staticmethod
     def get_available_keywords() -> list[str]:
         """Get list of available keyword names."""
-        return ['Resist', 'Ward', 'Bodyguard', 'Evasive', 'Singer', 'Support', 'Rush']
+        return [
+            'Resist', 'Ward', 'Bodyguard', 'Evasive', 'Singer', 'Support', 'Rush',
+            'Shift', 'Puppy Shift', 'Universal Shift', 'Challenger', 'Reckless', 
+            'Vanish', 'Sing Together'
+        ]
 
 
 # =============================================================================
