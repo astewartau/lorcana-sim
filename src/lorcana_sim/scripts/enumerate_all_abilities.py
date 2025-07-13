@@ -14,7 +14,7 @@ import json
 import re
 from collections import defaultdict, Counter
 from pathlib import Path
-from typing import Dict, List, Tuple, Set
+from typing import Dict, List
 from datetime import datetime
 
 
@@ -390,8 +390,7 @@ class AbilityAnalyzer:
                 if ability.get('keyword'):
                     keyword_name = ability['keyword'].capitalize()
                     keyword_counts[keyword_name] += 1
-                # Skip abilities without proper keyword field to avoid false positives
-                # (effect text may mention keywords without the card having that keyword)
+                # Skip non-keyword abilities
             
             for keyword, count in sorted(keyword_counts.items()):
                 report.append(f"- [ ] **{keyword}** (~{count} cards)")
