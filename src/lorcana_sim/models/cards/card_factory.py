@@ -7,14 +7,7 @@ from .character_card import CharacterCard
 from .action_card import ActionCard
 from .item_card import ItemCard
 from .location_card import LocationCard
-from ..abilities.base_ability import (
-    Ability,
-    AbilityType,
-    KeywordAbility,
-    StaticAbility,
-    TriggeredAbility,
-    ActivatedAbility,
-)
+# Composable abilities are now handled separately from card creation
 
 
 class CardFactory:
@@ -114,126 +107,48 @@ class CardFactory:
         }
     
     @staticmethod
-    def _parse_abilities(card_data: Dict[str, Any]) -> List[Ability]:
-        """Parse abilities from both abilities and keywordAbilities arrays."""
-        abilities = []
+    def _parse_abilities(card_data: Dict[str, Any]) -> List:
+        """Parse abilities from card data.
         
-        # Parse structured abilities array
-        abilities_data = card_data.get("abilities", [])
-        for ability_data in abilities_data:
-            ability_type_str = ability_data.get("type", "")
-            name = ability_data.get("name", "")
-            effect = ability_data.get("effect", "")
-            full_text = ability_data.get("fullText", effect)
+        Returns empty list for now - composable abilities are added separately.
+        """
+        # Composable abilities are now added via keyword parsing
+        # and ability text parsing in a separate system
+        return []
+    
+    @staticmethod
+    def create_cards_from_database(database: List[Dict[str, Any]]) -> List[Card]:
+        """Create a list of cards from database JSON data.
+        
+        Args:
+            database: List of card data dictionaries from allCards.json
             
-            if ability_type_str == "keyword":
-                keyword = ability_data.get("keyword", "")
-                # Extract value from keywordValueNumber (not value)
-                value = ability_data.get("keywordValueNumber")
-                abilities.append(KeywordAbility(
-                    name=name or keyword,  # Use keyword as name if name is empty
-                    type=AbilityType.KEYWORD,
-                    effect=effect,
-                    full_text=full_text,
-                    keyword=keyword,
-                    value=value
-                ))
-            elif ability_type_str == "triggered":
-                abilities.append(TriggeredAbility(
-                    name=name,
-                    type=AbilityType.TRIGGERED,
-                    effect=effect,
-                    full_text=full_text,
-                    trigger_condition=effect  # Store as string for now
-                ))
-            elif ability_type_str == "static":
-                abilities.append(StaticAbility(
-                    name=name,
-                    type=AbilityType.STATIC,
-                    effect=effect,
-                    full_text=full_text
-                ))
-            elif ability_type_str == "activated":
-                abilities.append(ActivatedAbility(
-                    name=name,
-                    type=AbilityType.ACTIVATED,
-                    effect=effect,
-                    full_text=full_text,
-                    costs=[]  # TODO: Parse costs from text
-                ))
-            else:
-                # Create a generic ability for unknown types
-                abilities.append(Ability(
-                    name=name,
-                    type=AbilityType.STATIC,  # Default fallback
-                    effect=effect,
-                    full_text=full_text
-                ))
-        
-        # Parse keywordAbilities array and merge with existing
-        keyword_abilities_from_array = set(card_data.get("keywordAbilities", []))
-        keywords_already_parsed = set()
-        
-        # Track which keywords already have structured data
-        for ability in abilities:
-            if hasattr(ability, 'keyword') and ability.keyword:
-                keywords_already_parsed.add(ability.keyword)
-        
-        # Add missing keywords from keywordAbilities array
-        missing_keywords = keyword_abilities_from_array - keywords_already_parsed
-        for keyword_name in missing_keywords:
-            abilities.append(KeywordAbility(
-                name=keyword_name,
-                type=AbilityType.KEYWORD,
-                effect=f'{keyword_name} keyword ability',
-                full_text='',
-                keyword=keyword_name,
-                value=None
-            ))
-        
-        return abilities
-    
-    @staticmethod
-    def find_card_by_dreamborn_name(card_database: List[Dict[str, Any]], dreamborn_name: str) -> Optional[Dict[str, Any]]:
-        """Find card in database by Dreamborn deck name (not by numeric ID)."""
-        # Dreamborn uses card names, not the numeric "id" field
-        for card in card_database:
-            if card.get("fullName") == dreamborn_name:
-                return card
-        return None
-    
-    @staticmethod
-    def create_cards_from_database(card_database) -> List[Card]:
-        """Create all cards from a lorcana-json database."""
-        # Handle both file path string and list of card data
-        if isinstance(card_database, str):
-            from ...loaders.lorcana_json_parser import LorcanaJsonParser
-            parser = LorcanaJsonParser(card_database)
-            card_database = parser.cards
+        Returns:
+            List of successfully created Card objects (skips invalid cards)
+        """
         cards = []
-        errors = []
-        skipped_empty_color = 0
-        
-        for card_data in card_database:
+        for card_data in database:
             try:
-                # Skip cards with empty color (likely promotional/special variants)
-                if not card_data.get("color", ""):
-                    skipped_empty_color += 1
-                    continue
-                    
                 card = CardFactory.from_json(card_data)
                 cards.append(card)
-            except Exception as e:
-                errors.append(f"Error creating card {card_data.get('fullName', 'Unknown')}: {e}")
-        
-        if skipped_empty_color > 0:
-            print(f"Skipped {skipped_empty_color} cards with empty color fields (likely promotional variants)")
-        
-        if errors:
-            print(f"Encountered {len(errors)} errors while creating cards:")
-            for error in errors[:10]:  # Show first 10 errors
-                print(f"  {error}")
-            if len(errors) > 10:
-                print(f"  ... and {len(errors) - 10} more errors")
-        
+            except (KeyError, ValueError) as e:
+                # Skip invalid cards but don't crash
+                print(f"Warning: Failed to create card from data {card_data.get('name', 'Unknown')}: {e}")
+                continue
         return cards
+    
+    @staticmethod
+    def find_card_by_dreamborn_name(database: List[Dict[str, Any]], dreamborn_name: str) -> Optional[Dict[str, Any]]:
+        """Find a card in the database by its Dreamborn nickname (fullName).
+        
+        Args:
+            database: List of card data dictionaries from allCards.json
+            dreamborn_name: The card name from Dreamborn format (e.g., "HeiHei - Protective Rooster")
+            
+        Returns:
+            Card data dictionary if found, None otherwise
+        """
+        for card_data in database:
+            if card_data.get('fullName') == dreamborn_name:
+                return card_data
+        return None

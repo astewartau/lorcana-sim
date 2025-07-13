@@ -5,7 +5,7 @@ from enum import Enum
 from typing import List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..abilities.base_ability import Ability
+    from ..abilities.composable import ComposableAbility
 
 
 class CardColor(Enum):
@@ -51,7 +51,7 @@ class Card:
     story: str
     
     # Abilities & Text
-    abilities: List["Ability"] = field(default_factory=list)
+    abilities: List["ComposableAbility"] = field(default_factory=list)
     flavor_text: Optional[str] = None
     full_text: str = ""
     

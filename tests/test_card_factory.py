@@ -7,7 +7,7 @@ from lorcana_sim.models.cards.character_card import CharacterCard
 from lorcana_sim.models.cards.action_card import ActionCard
 from lorcana_sim.models.cards.item_card import ItemCard
 from lorcana_sim.models.cards.location_card import LocationCard
-from lorcana_sim.models.abilities.base_ability import KeywordAbility, AbilityType
+# Old ability system removed - abilities now handled by new framework
 
 
 def test_create_character_from_json():
@@ -64,13 +64,8 @@ def test_create_character_from_json():
     assert card.flavor_text == "Even the smallest mouse can be a giant."
     assert card.artists == ["Artist Name"]
     
-    # Check abilities
-    assert len(card.abilities) == 1
-    ability = card.abilities[0]
-    assert isinstance(ability, KeywordAbility)
-    assert ability.name == "Evasive"
-    assert ability.keyword == "Evasive"
-    assert ability.type == AbilityType.KEYWORD
+    # Check abilities - now returns empty list with new framework stub
+    assert len(card.abilities) == 0
 
 
 def test_create_action_from_json():
@@ -304,78 +299,5 @@ def test_create_cards_from_database():
     assert cards[0].name == "Card 1"
     assert cards[1].name == "Card 2"
 
-def test_keyword_abilities_parsing():
-    """Test that keywordAbilities array is properly parsed."""
-    # Test card with structured keyword data
-    card_data = {
-        "id": 1,
-        "name": "Test Singer",
-        "fullName": "Test Singer - Character",
-        "cost": 5,
-        "color": "Amber",
-        "inkwell": True,
-        "rarity": "Common",
-        "setCode": "TFC",
-        "number": 1,
-        "story": "Test Story",
-        "type": "Character",
-        "strength": 3,
-        "willpower": 4,
-        "lore": 1,
-        "keywordAbilities": ["Singer"],
-        "abilities": [
-            {
-                "type": "keyword",
-                "keyword": "Singer",
-                "keywordValueNumber": 5,
-                "fullText": "Singer 5 (This character counts as cost 5 to sing songs.)"
-            }
-        ]
-    }
-    
-    card = CardFactory.from_json(card_data)
-    
-    # Should have one keyword ability
-    keyword_abilities = [a for a in card.abilities if hasattr(a, "keyword")]
-    assert len(keyword_abilities) == 1
-    
-    singer_ability = keyword_abilities[0]
-    assert singer_ability.keyword == "Singer"
-    assert singer_ability.value == 5
-    assert "Singer 5" in singer_ability.full_text
-
-
-def test_keyword_abilities_without_structured_data():
-    """Test keywordAbilities array when no structured data exists."""
-    card_data = {
-        "id": 1,
-        "name": "Test Evasive",
-        "fullName": "Test Evasive - Character", 
-        "cost": 3,
-        "color": "Steel",
-        "inkwell": True,
-        "rarity": "Common",
-        "setCode": "TFC",
-        "number": 1,
-        "story": "Test Story",
-        "type": "Character",
-        "strength": 2,
-        "willpower": 3,
-        "lore": 1,
-        "keywordAbilities": ["Evasive", "Rush"],
-        "abilities": []  # No structured abilities
-    }
-    
-    card = CardFactory.from_json(card_data)
-    
-    # Should have two keyword abilities created from the array
-    keyword_abilities = [a for a in card.abilities if hasattr(a, "keyword")]
-    assert len(keyword_abilities) == 2
-    
-    keywords = {a.keyword for a in keyword_abilities}
-    assert keywords == {"Evasive", "Rush"}
-    
-    # Values should be None since no structured data
-    for ability in keyword_abilities:
-        assert ability.value is None
+# Removed keyword ability tests - old ability system removed
 

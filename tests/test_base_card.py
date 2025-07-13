@@ -2,7 +2,7 @@
 
 import pytest
 from lorcana_sim.models.cards.base_card import Card, CardColor, Rarity
-from lorcana_sim.models.abilities.base_ability import Ability, AbilityType
+# Old ability system removed
 
 
 def test_card_creation():

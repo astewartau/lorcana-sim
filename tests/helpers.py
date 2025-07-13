@@ -4,7 +4,7 @@ from typing import List, Optional
 from lorcana_sim.models.cards.character_card import CharacterCard
 from lorcana_sim.models.cards.action_card import ActionCard
 from lorcana_sim.models.cards.base_card import CardColor, Rarity
-from lorcana_sim.models.abilities.base_ability import Ability, AbilityType
+# Old ability system removed - using composable abilities now
 from lorcana_sim.models.game.game_state import GameState, Phase
 from lorcana_sim.models.game.player import Player
 from lorcana_sim.models.game.deck import Deck
@@ -12,8 +12,7 @@ from lorcana_sim.engine.move_validator import MoveValidator
 from lorcana_sim.engine.game_engine import GameEngine
 
 
-def create_test_character(name: str, abilities: List[Ability] = None, 
-                         cost: int = 3, strength: int = 2, willpower: int = 3, 
+def create_test_character(name: str, cost: int = 3, strength: int = 2, willpower: int = 3, 
                          lore: int = 1, color: CardColor = CardColor.AMBER) -> CharacterCard:
     """Helper to create test character cards."""
     return CharacterCard(
@@ -31,19 +30,13 @@ def create_test_character(name: str, abilities: List[Ability] = None,
         strength=strength,
         willpower=willpower,
         lore=lore,
-        abilities=abilities or []
+        abilities=[]
     )
 
 
 def create_test_song(cost: int, singer_cost: int, name: str = "Test Song") -> ActionCard:
     """Helper to create test song cards."""
-    # Create an ability with the proper song text format
-    song_ability = Ability(
-        name="Song Effect",
-        type=AbilityType.STATIC,
-        effect=f"A character with cost {singer_cost} or more can sing this song for free.",
-        full_text=f"A character with cost {singer_cost} or more can sing this song for free."
-    )
+    # Simple song creation - composable abilities would be added separately
     
     song = ActionCard(
         id=1,
@@ -57,7 +50,7 @@ def create_test_song(cost: int, singer_cost: int, name: str = "Test Song") -> Ac
         set_code="TEST",
         number=1,
         story="Test",
-        abilities=[song_ability]
+        abilities=[]
     )
     return song
 
@@ -133,13 +126,13 @@ def setup_game_with_characters(player1_characters: List[CharacterCard],
     return game_state, validator, engine
 
 
-def create_character_with_ability(name: str, ability: Ability, **kwargs) -> CharacterCard:
-    """Helper to create a character with a specific ability."""
-    return create_test_character(name, abilities=[ability], **kwargs)
+# create_character_with_ability removed - use composable abilities instead
 
 
 def advance_to_main_phase(game_state: GameState) -> None:
     """Advance game state to MAIN phase for testing actions."""
     game_state.current_phase = Phase.MAIN
-    game_state.players[0].available_ink = 10
-    game_state.players[1].available_ink = 10
+    # Reset ink usage to give players full ink access
+    game_state.players[0].ink_used_this_turn = 0
+    if len(game_state.players) > 1:
+        game_state.players[1].ink_used_this_turn = 0

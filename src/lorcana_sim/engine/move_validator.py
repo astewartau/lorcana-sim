@@ -17,23 +17,35 @@ class MoveValidator:
     def get_all_legal_actions(self) -> List[Tuple[GameAction, Dict[str, Any]]]:
         """Get all legal actions for current player in current phase."""
         legal_actions = []
+        
+        # No actions available if game is over
+        if self.game_state.is_game_over():
+            return legal_actions
+        
         current_player = self.game_state.current_player
         phase = self.game_state.current_phase
         
         # Use value comparison to avoid enum identity issues
         if phase.value == 'ready':
+            legal_actions.append((GameAction.PROGRESS, {}))
             legal_actions.append((GameAction.PASS_TURN, {}))
         
         elif phase.value == 'set':
+            # Set step - resolve start-of-turn effects
+            legal_actions.append((GameAction.PROGRESS, {}))
+            legal_actions.append((GameAction.PASS_TURN, {}))
+        
+        elif phase.value == 'draw':
+            # Draw step - draw a card
+            legal_actions.append((GameAction.PROGRESS, {}))
+            legal_actions.append((GameAction.PASS_TURN, {}))
+        
+        elif phase.value == 'play':
             # Play ink (once per turn)
             if self.game_state.can_play_ink():
                 ink_cards = self.get_playable_ink_cards()
                 for card in ink_cards:
                     legal_actions.append((GameAction.PLAY_INK, {'card': card}))
-            
-            legal_actions.append((GameAction.PASS_TURN, {}))
-        
-        elif phase.value == 'main':
             # Play characters
             characters = self.get_playable_characters()
             for character in characters:
@@ -70,6 +82,8 @@ class MoveValidator:
                     'singer': singer
                 }))
             
+            # Add progress and pass turn options
+            legal_actions.append((GameAction.PROGRESS, {}))
             legal_actions.append((GameAction.PASS_TURN, {}))
         
         return legal_actions
@@ -142,14 +156,33 @@ class MoveValidator:
     
     def _get_valid_challenge_targets(self, attacker: CharacterCard, all_defenders: List[CharacterCard]) -> List[CharacterCard]:
         """Get valid challenge targets considering abilities that modify targeting."""
-        valid_targets = list(all_defenders)  # Start with all potential targets
+        valid_targets = []
         
-        # Let abilities modify the target list (this handles Bodyguard rules)
-        for character in all_defenders:
-            for ability in character.abilities:
-                valid_targets = ability.modifies_challenge_targets(attacker, valid_targets, self.game_state)
+        # Check if attacker has Evasive
+        attacker_has_evasive = self._character_has_evasive(attacker)
+        
+        for defender in all_defenders:
+            # Check if defender has Evasive
+            if self._character_has_evasive(defender):
+                # Only attackers with Evasive can challenge Evasive defenders
+                if attacker_has_evasive:
+                    valid_targets.append(defender)
+                # else: can't challenge this defender
+            else:
+                # Non-Evasive defenders can be challenged by anyone
+                valid_targets.append(defender)
+        
+        # TODO: Add Bodyguard redirection logic here
         
         return valid_targets
+    
+    def _character_has_evasive(self, character: CharacterCard) -> bool:
+        """Check if a character has Evasive ability."""
+        if hasattr(character, 'composable_abilities'):
+            for ability in character.composable_abilities:
+                if hasattr(ability, 'name') and 'evasive' in ability.name.lower():
+                    return True
+        return False
     
     def can_challenge(self, attacker: CharacterCard, defender: CharacterCard) -> bool:
         """Check if attacker can challenge defender using ability delegation."""
@@ -171,15 +204,7 @@ class MoveValidator:
         if defender not in valid_targets:
             return False
         
-        # Let defender's abilities decide if they can be challenged by this attacker
-        for ability in defender.abilities:
-            if not ability.allows_being_challenged_by(attacker, defender, self.game_state):
-                return False
-        
-        # Let attacker's abilities decide if they can challenge this defender
-        for ability in attacker.abilities:
-            if not ability.allows_challenging(attacker, defender, self.game_state):
-                return False
+        # New framework abilities don't restrict challenges by default
         
         return True
     
@@ -200,27 +225,32 @@ class MoveValidator:
         return singable
     
     def _can_sing_song(self, singer: CharacterCard, song: ActionCard) -> bool:
-        """Check if a character can sing a song using ability delegation."""
+        """Check if a character can sing a song using composable abilities."""
         # Check if singer is exerted
         if singer.exerted:
             return False
         
-        # Let abilities decide if singing is allowed
-        for ability in singer.abilities:
-            if not ability.allows_singing_song(singer, song, self.game_state):
-                return False
+        # Check composable abilities for Singer
+        required_cost = self._get_song_singer_cost(song)
+        for ability in singer.composable_abilities:
+            if ability.can_sing_song(required_cost):
+                return True
         
-        # Calculate total cost after ability modifications
-        base_cost = song.cost
-        total_modification = 0
+        return False
+    
+    def _get_song_singer_cost(self, song: ActionCard) -> int:
+        """Extract the singer cost requirement from a song."""
+        # Try to parse the singer cost from song abilities
+        for ability in song.abilities:
+            if hasattr(ability, 'effect') and "sing this song" in ability.effect.lower():
+                # Try to extract cost from text like "A character with cost X or more can sing this song"
+                import re
+                match = re.search(r'cost (\d+)', ability.effect.lower())
+                if match:
+                    return int(match.group(1))
         
-        for ability in singer.abilities:
-            total_modification += ability.get_song_cost_modification(singer, song, self.game_state)
-        
-        effective_cost = base_cost + total_modification
-        
-        # For singers, the effective cost should be 0 (they sing for free by exerting)
-        return effective_cost <= 0
+        # Fallback: assume songs require a cost equal to their regular cost
+        return song.cost
     
     def validate_action(self, action: GameAction, parameters: Dict[str, Any]) -> Tuple[bool, str]:
         """Validate if a specific action with parameters is legal."""

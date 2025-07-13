@@ -1,13 +1,16 @@
 """Character card implementation."""
 
 from dataclasses import dataclass, field
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, Dict, Any, Tuple
 
 from .base_card import Card
 
 if TYPE_CHECKING:
     from ...engine.damage_calculator import DamageCalculator, DamageType
     from ..game.game_state import GameState
+    from ...engine.event_system import GameEventManager
+    from ..abilities.composable import ComposableAbility
+    from ..game.player import Player
 
 
 @dataclass
@@ -25,8 +28,19 @@ class CharacterCard(Card):
     # Runtime State (not from JSON - game state)
     damage: int = 0
     exerted: bool = False
+    is_dry: bool = True  # Ink drying status - True means ready to act
     location: Optional[str] = None
     turn_played: Optional[int] = None  # Track when character was played for ink drying
+    
+    # Composable Ability Integration
+    composable_abilities: List['ComposableAbility'] = field(default_factory=list)
+    controller: Optional['Player'] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    
+    # Stat Bonus Tracking (for abilities like Support)
+    lore_bonuses: List[Tuple[int, str]] = field(default_factory=list)
+    strength_bonuses: List[Tuple[int, str]] = field(default_factory=list)
+    willpower_bonuses: List[Tuple[int, str]] = field(default_factory=list)
     
     def __post_init__(self) -> None:
         """Validate character card data after creation."""
@@ -48,21 +62,30 @@ class CharacterCard(Card):
     
     @property
     def current_strength(self) -> int:
-        """Get current strength (may be modified by abilities later)."""
-        # TODO: Apply ability modifiers
-        return self.strength
+        """Get current strength including ability modifiers."""
+        base = self.strength
+        # Add bonuses
+        for amount, duration in self.strength_bonuses:
+            base += amount
+        return max(0, base)
     
     @property
     def current_willpower(self) -> int:
-        """Get current willpower (may be modified by abilities later)."""
-        # TODO: Apply ability modifiers
-        return self.willpower
+        """Get current willpower including ability modifiers."""
+        base = self.willpower
+        # Add bonuses  
+        for amount, duration in self.willpower_bonuses:
+            base += amount
+        return max(1, base)  # Willpower must be at least 1
     
     @property
     def current_lore(self) -> int:
-        """Get current lore value (may be modified by abilities later)."""
-        # TODO: Apply ability modifiers
-        return self.lore
+        """Get current lore value including ability modifiers."""
+        base = self.lore
+        # Add bonuses
+        for amount, duration in self.lore_bonuses:
+            base += amount
+        return max(0, base)
     
     def deal_damage(self, 
                    amount: int, 
@@ -113,29 +136,22 @@ class CharacterCard(Card):
         """Ready this character."""
         self.exerted = False
     
-    def is_dry(self, current_turn: int) -> bool:
-        """Check if character's ink is dry (can act normally).
-        
-        Characters have wet ink when played and cannot quest or challenge
-        until the start of their owner's next turn (when ink dries).
-        """
-        if self.turn_played is None:
-            return True  # Character wasn't played this game (already dry)
-        
-        # Ink dries at start of owner's next turn
-        return current_turn > self.turn_played
     
     def has_rush_ability(self) -> bool:
         """Check if character has Rush ability."""
-        from ...abilities.keywords.rush import RushAbility
-        return any(isinstance(ability, RushAbility) for ability in self.abilities)
+        # Check composable abilities for Rush
+        for ability in self.composable_abilities:
+            if 'rush' in ability.name.lower():
+                return True
+        # Check metadata set by Rush ability
+        return self.metadata.get('can_challenge_with_wet_ink', False)
     
     def can_quest(self, current_turn: int) -> bool:
         """Check if this character can quest.
         
         Questing requires dry ink - Rush does not affect questing.
         """
-        return not self.exerted and self.is_alive and self.is_dry(current_turn)
+        return not self.exerted and self.is_alive and self.is_dry
     
     def can_challenge(self, current_turn: int) -> bool:
         """Check if this character can challenge.
@@ -150,7 +166,7 @@ class CharacterCard(Card):
             return True
         
         # Normal characters need dry ink to challenge
-        return self.is_dry(current_turn)
+        return self.is_dry
     
     def has_subtype(self, subtype: str) -> bool:
         """Check if this character has a specific subtype."""
@@ -172,3 +188,37 @@ class CharacterCard(Card):
         if self.damage > 0:
             status += f" [{self.damage} damage]"
         return f"{self.full_name} ({self.strength}/{self.willpower}){status}"
+    
+    # Stat Bonus Management Methods
+    def add_lore_bonus(self, amount: int, duration: str) -> None:
+        """Add a lore bonus to this character."""
+        self.lore_bonuses.append((amount, duration))
+    
+    def add_strength_bonus(self, amount: int, duration: str) -> None:
+        """Add a strength bonus to this character.""" 
+        self.strength_bonuses.append((amount, duration))
+    
+    def add_willpower_bonus(self, amount: int, duration: str) -> None:
+        """Add a willpower bonus to this character."""
+        self.willpower_bonuses.append((amount, duration))
+    
+    def clear_temporary_bonuses(self) -> None:
+        """Clear all 'this_turn' bonuses at end of turn."""
+        self.lore_bonuses = [(amount, duration) for amount, duration in self.lore_bonuses if duration != "this_turn"]
+        self.strength_bonuses = [(amount, duration) for amount, duration in self.strength_bonuses if duration != "this_turn"]
+        self.willpower_bonuses = [(amount, duration) for amount, duration in self.willpower_bonuses if duration != "this_turn"]
+    
+    # Composable Ability Integration Methods
+    def register_composable_abilities(self, event_manager: 'GameEventManager') -> None:
+        """Register all composable abilities with the event manager."""
+        for ability in self.composable_abilities:
+            ability.register_with_event_manager(event_manager)
+    
+    def unregister_composable_abilities(self, event_manager: 'GameEventManager') -> None:
+        """Unregister all composable abilities from the event manager."""
+        for ability in self.composable_abilities:
+            ability.unregister_from_event_manager()
+    
+    def add_composable_ability(self, ability: 'ComposableAbility') -> None:
+        """Add a composable ability to this character."""
+        self.composable_abilities.append(ability)

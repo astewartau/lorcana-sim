@@ -1,19 +1,13 @@
-"""Ability system for Lorcana cards."""
+"""Ability system for Lorcana simulation.
 
-from .base_ability import (
-    Ability,
-    AbilityType,
-    KeywordAbility,
-    StaticAbility,
-    TriggeredAbility,
-    ActivatedAbility,
-)
+This module provides the composable ability framework for creating
+flexible, reusable game abilities.
+"""
+
+# Re-export the composable ability system
+from .composable import *
 
 __all__ = [
-    "Ability",
-    "AbilityType",
-    "KeywordAbility",
-    "StaticAbility",
-    "TriggeredAbility",
-    "ActivatedAbility",
+    # Everything from composable is re-exported
+    *__import__('lorcana_sim.models.abilities.composable', fromlist=['__all__']).__all__
 ]
