@@ -383,30 +383,15 @@ class AbilityAnalyzer:
             for keyword in sorted(unique_keywords.keys()):
                 report.append(f"- [ ] **{keyword}** ({unique_keywords[keyword]['count']} cards)")
         else:
-            # Extract common keyword patterns from effects
+            # Count keyword abilities by their 'keyword' field, not effect text
             keyword_counts = defaultdict(int)
             for ability in keyword_abilities:
-                effect = ability['effect'].lower()
-                if 'bodyguard' in effect:
-                    keyword_counts['Bodyguard'] += 1
-                elif 'evasive' in effect:
-                    keyword_counts['Evasive'] += 1
-                elif 'rush' in effect:
-                    keyword_counts['Rush'] += 1
-                elif 'singer' in effect:
-                    keyword_counts['Singer'] += 1
-                elif 'shift' in effect:
-                    keyword_counts['Shift'] += 1
-                elif 'ward' in effect:
-                    keyword_counts['Ward'] += 1
-                elif 'resist' in effect:
-                    keyword_counts['Resist'] += 1
-                elif 'reckless' in effect:
-                    keyword_counts['Reckless'] += 1
-                elif 'challenger' in effect:
-                    keyword_counts['Challenger'] += 1
-                elif 'support' in effect:
-                    keyword_counts['Support'] += 1
+                # Only count abilities that have actual keyword field
+                if ability.get('keyword'):
+                    keyword_name = ability['keyword'].capitalize()
+                    keyword_counts[keyword_name] += 1
+                # Skip abilities without proper keyword field to avoid false positives
+                # (effect text may mention keywords without the card having that keyword)
             
             for keyword, count in sorted(keyword_counts.items()):
                 report.append(f"- [ ] **{keyword}** (~{count} cards)")
