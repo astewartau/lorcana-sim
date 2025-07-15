@@ -143,10 +143,53 @@ class DrawCards(Effect):
         self.count = count
     
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        controller = getattr(target, 'controller', context.get('source', {}).get('controller'))
+        # If target is already a player/controller, use it directly
+        if hasattr(target, 'draw_cards'):
+            drawn_cards = target.draw_cards(self.count)
+            self._set_card_draw_event(target, drawn_cards, context)
+            return target
+        
+        # Otherwise get controller from target
+        controller = getattr(target, 'controller', None)
+        if not controller:
+            # Fallback: get controller from source character
+            source = context.get('source')
+            if source and hasattr(source, 'controller'):
+                controller = source.controller
+        
         if controller and hasattr(controller, 'draw_cards'):
-            controller.draw_cards(self.count)
+            drawn_cards = controller.draw_cards(self.count)
+            self._set_card_draw_event(controller, drawn_cards, context)
         return target
+    
+    def _set_card_draw_event(self, player: Any, drawn_cards: List[Any], context: Dict[str, Any]) -> None:
+        """Set the last event for card draws from abilities."""
+        game_state = context.get('game_state')
+        if not game_state or not hasattr(game_state, 'set_last_event'):
+            return
+        
+        # Only set event if cards were actually drawn
+        actual_cards = [card for card in drawn_cards if card is not None]
+        if not actual_cards:
+            return
+            
+        # Determine the source of the draw
+        source_character = context.get('source')
+        ability_name = "Unknown Ability"
+        if source_character and hasattr(source_character, 'full_name'):
+            ability_name = source_character.full_name
+        
+        # Set the last event with structured data
+        game_state.set_last_event(
+            'CARD_DRAWN',
+            player=player.name,
+            cards_drawn=actual_cards,
+            count=len(actual_cards),
+            source='ability',
+            ability_name=ability_name,
+            hand_size_after=len(player.hand),
+            deck_size_after=len(player.deck)
+        )
     
     def __str__(self) -> str:
         return f"draw {self.count} card{'s' if self.count != 1 else ''}"
@@ -174,6 +217,62 @@ class ReturnToHand(Effect):
     
     def __str__(self) -> str:
         return "return to hand"
+
+
+class DiscardCard(Effect):
+    """Discard target card from hand."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Get the controller who owns this card
+        if hasattr(target, 'controller'):
+            controller = target.controller
+        else:
+            # If target doesn't have controller, get from ability owner
+            ability_owner = context.get('ability_owner')
+            controller = ability_owner.controller if ability_owner else None
+        
+        if controller and hasattr(controller, 'hand') and target in controller.hand:
+            # Add discard event to collection for composite effects
+            game_state = context.get('game_state')
+            if game_state:
+                card_name = target.name if hasattr(target, 'name') else 'Unknown Card'
+                discard_event = {
+                    'type': 'CARD_DISCARDED',
+                    'player': controller.name,
+                    'card_discarded': target,
+                    'card_name': card_name,
+                    'source': 'ability',
+                    'ability_name': context.get('ability_name', 'Unknown'),
+                    'hand_size_after': len(controller.hand) - 1,
+                    'discard_size_after': len(controller.discard_pile) + 1,
+                    'timestamp': len(getattr(game_state, 'actions_this_turn', [])) + len(getattr(game_state, 'choice_events', []))
+                }
+                
+                # Add to choice events collection if it exists, otherwise set as last event
+                if hasattr(game_state, 'choice_events'):
+                    game_state.choice_events.append(discard_event)
+                elif hasattr(game_state, 'set_last_event'):
+                    game_state.set_last_event(**{k: v for k, v in discard_event.items() if k != 'timestamp'})
+            
+            controller.hand.remove(target)
+            controller.discard_pile.append(target)
+        
+        return target
+    
+    def __str__(self) -> str:
+        return "discard card"
+
+
+class ExertCharacter(Effect):
+    """Exert a character."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if hasattr(target, 'exerted'):
+            target.exerted = True
+        return target
+    
+    def __str__(self) -> str:
+        return "exert character"
 
 
 class PreventEffect(Effect):
@@ -317,6 +416,8 @@ DRAW_3 = DrawCards(3)
 # Other common effects
 BANISH = BanishCharacter()
 RETURN_TO_HAND = ReturnToHand()
+DISCARD_CARD = DiscardCard()
+EXERT_CHARACTER = ExertCharacter()
 PREVENT_TARGETING = PreventEffect("targeting")
 NO_EFFECT = NoEffect()
 
@@ -436,18 +537,6 @@ class CostModification(Effect):
         return f"modify {self.target_type} cost by {sign}{self.cost_change}"
 
 
-class ExertCharacter(Effect):
-    """Exert a character."""
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        if hasattr(target, 'exerted'):
-            target.exerted = True
-        return target
-    
-    def __str__(self) -> str:
-        return "exert character"
-
-
 class ReadyCharacter(Effect):
     """Ready (un-exert) a character."""
     
@@ -556,3 +645,345 @@ EXERT = ExertCharacter()
 READY = ReadyCharacter()
 SEARCH_1 = SearchLibrary(1)
 PLAY_FROM_DISCARD = PlayCardFromDiscard()
+
+
+# =============================================================================
+# NAMED ABILITY SPECIFIC EFFECTS
+# =============================================================================
+
+class PreventSingingEffect(Effect):
+    """Prevents a character from singing songs (VOICELESS)."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if hasattr(target, 'can_sing'):
+            target.can_sing = False
+        return target
+    
+    def __str__(self) -> str:
+        return "prevent singing"
+
+
+class ConditionalStatBonus(Effect):
+    """Conditional stat bonus based on board state."""
+    
+    def __init__(self, strength: int = 0, willpower: int = 0, 
+                 lore: int = 0, condition_func: Callable = None):
+        self.strength = strength
+        self.willpower = willpower  
+        self.lore = lore
+        self.condition_func = condition_func
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if self.condition_func and self.condition_func(target, context):
+            if hasattr(target, 'strength') and self.strength:
+                target.strength += self.strength
+            if hasattr(target, 'willpower') and self.willpower:
+                target.willpower += self.willpower
+            if hasattr(target, 'lore') and self.lore:
+                target.lore += self.lore
+        return target
+    
+    def __str__(self) -> str:
+        parts = []
+        if self.strength: parts.append(f"+{self.strength}⚔")
+        if self.willpower: parts.append(f"+{self.willpower}◇") 
+        if self.lore: parts.append(f"+{self.lore}⛉")
+        return f"conditional {' '.join(parts)}"
+
+
+class CostReductionEffect(Effect):
+    """Reduces the cost to play a character."""
+    
+    def __init__(self, amount: int, condition_func: Callable = None):
+        self.amount = amount
+        self.condition_func = condition_func
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if self.condition_func and self.condition_func(target, context):
+            if hasattr(target, 'ink_cost'):
+                target.ink_cost = max(0, target.ink_cost - self.amount)
+        return target
+    
+    def __str__(self) -> str:
+        return f"reduce cost by {self.amount}"
+
+
+class RemoveDamageEffect(Effect):
+    """Removes damage from a character."""
+    
+    def __init__(self, amount: int, up_to: bool = False):
+        self.amount = amount
+        self.up_to = up_to
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if hasattr(target, 'damage'):
+            if self.up_to:
+                remove_amount = min(self.amount, target.damage)
+            else:
+                remove_amount = self.amount
+            target.damage = max(0, target.damage - remove_amount)
+        return target
+    
+    def __str__(self) -> str:
+        prefix = "up to " if self.up_to else ""
+        return f"remove {prefix}{self.amount} damage"
+
+
+class ReturnCardToHandEffect(Effect):
+    """Returns a card from discard to hand."""
+    
+    def __init__(self, card_filter: Callable = None):
+        self.card_filter = card_filter
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # This would interact with game state to move card from discard to hand
+        # Implementation depends on game state structure
+        return target
+    
+    def __str__(self) -> str:
+        return "return card to hand"
+
+
+class DeckManipulationEffect(Effect):
+    """Look at top cards, optionally reveal and take one."""
+    
+    def __init__(self, cards_to_look: int, card_filter: Callable = None, 
+                 reveal: bool = False, to_hand: bool = True):
+        self.cards_to_look = cards_to_look
+        self.card_filter = card_filter
+        self.reveal = reveal
+        self.to_hand = to_hand
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # This would interact with game state to manipulate deck
+        # Implementation depends on game state structure
+        return target
+    
+    def __str__(self) -> str:
+        return f"look at top {self.cards_to_look} cards"
+
+
+class ReadyCharactersEffect(Effect):
+    """Ready characters with specific traits."""
+    
+    def __init__(self, character_filter: Callable = None, exclude_self: bool = True):
+        self.character_filter = character_filter
+        self.exclude_self = exclude_self
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # This would interact with game state to ready characters
+        # Implementation depends on game state structure
+        return target
+    
+    def __str__(self) -> str:
+        return "ready characters"
+
+
+class BanishTargetEffect(Effect):
+    """Banish the target character."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if hasattr(target, 'banish'):
+            target.banish()
+        return target
+    
+    def __str__(self) -> str:
+        return "banish target"
+
+
+class TemporaryStatModification(Effect):
+    """Temporary stat modification that lasts for a specific duration."""
+    
+    def __init__(self, strength: int = 0, willpower: int = 0, 
+                 lore: int = 0, duration: str = "turn"):
+        self.strength = strength
+        self.willpower = willpower
+        self.lore = lore
+        self.duration = duration
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Add temporary modifiers that will be cleaned up based on duration
+        if hasattr(target, 'add_temporary_modifier'):
+            target.add_temporary_modifier(
+                strength=self.strength,
+                willpower=self.willpower, 
+                lore=self.lore,
+                duration=self.duration
+            )
+        return target
+    
+    def __str__(self) -> str:
+        parts = []
+        if self.strength: parts.append(f"{self.strength:+}⚔")
+        if self.willpower: parts.append(f"{self.willpower:+}◇")
+        if self.lore: parts.append(f"{self.lore:+}⛉")
+        return f"temporary {' '.join(parts)} this {self.duration}"
+
+
+class GainLoreEffect(Effect):
+    """Gain lore effect."""
+    
+    def __init__(self, amount: int):
+        self.amount = amount
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        controller = target if hasattr(target, 'gain_lore') else getattr(target, 'controller', None)
+        if controller and hasattr(controller, 'gain_lore'):
+            # Set lore gained event before gaining lore
+            game_state = context.get('game_state')
+            if game_state and hasattr(game_state, 'set_last_event'):
+                lore_before = controller.lore
+                game_state.set_last_event(
+                    'LORE_GAINED',
+                    player=controller.name,
+                    lore_amount=self.amount,
+                    source='ability',
+                    ability_name=context.get('ability_name', 'Unknown'),
+                    lore_before=lore_before,
+                    lore_after=lore_before + self.amount
+                )
+            
+            controller.gain_lore(self.amount)
+        return target
+    
+    def __str__(self) -> str:
+        return f"gain {self.amount} lore"
+
+
+class GainLoreEqualToTargetLoreEffect(Effect):
+    """Gain lore equal to target's lore value."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        lore_value = getattr(target, 'lore', 0)
+        ability_owner = context.get('ability_owner')
+        if ability_owner and hasattr(ability_owner, 'controller'):
+            controller = ability_owner.controller
+            if hasattr(controller, 'gain_lore'):
+                controller.gain_lore(lore_value)
+        return target
+    
+    def __str__(self) -> str:
+        return "gain lore equal to target's lore"
+
+
+class ExertAllOpposingCharactersEffect(Effect):
+    """Exert all opposing characters."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        game_state = context.get('game_state')
+        ability_owner = context.get('ability_owner')
+        
+        if not game_state or not ability_owner:
+            return target
+            
+        for player in game_state.players:
+            if player != ability_owner.controller:
+                for character in player.characters_in_play:
+                    if hasattr(character, 'exerted'):
+                        character.exerted = True
+        return target
+    
+    def __str__(self) -> str:
+        return "exert all opposing characters"
+
+
+class EachOpponentExertsReadyCharacterEffect(Effect):
+    """Each opponent chooses and exerts one ready character."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        game_state = context.get('game_state')
+        ability_owner = context.get('ability_owner')
+        
+        if not game_state or not ability_owner:
+            return target
+            
+        for player in game_state.players:
+            if player != ability_owner.controller:
+                ready_chars = [c for c in player.characters_in_play 
+                             if hasattr(c, 'exerted') and not c.exerted]
+                if ready_chars:
+                    # For now, exert the first ready character
+                    # In real implementation, player would choose
+                    ready_chars[0].exerted = True
+        return target
+    
+    def __str__(self) -> str:
+        return "each opponent exerts a ready character"
+
+
+class GainChallengerBuffEffect(Effect):
+    """Gain Challenger +X for specified duration."""
+    
+    def __init__(self, amount: int, duration: str = "turn"):
+        self.amount = amount
+        self.duration = duration
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if hasattr(target, 'add_temporary_modifier'):
+            target.add_temporary_modifier(
+                challenger_bonus=self.amount,
+                duration=self.duration
+            )
+        return target
+    
+    def __str__(self) -> str:
+        return f"gain Challenger +{self.amount} this {self.duration}"
+
+
+class ReturnSelfToHandEffect(Effect):
+    """Return self to hand if condition is met."""
+    
+    def __init__(self, condition: Callable[[Any, Dict], bool] = None):
+        self.condition = condition or (lambda char, ctx: True)
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if self.condition(target, context):
+            if hasattr(target, 'controller') and hasattr(target.controller, 'return_to_hand'):
+                target.controller.return_to_hand(target)
+        return target
+    
+    def __str__(self) -> str:
+        return "return self to hand"
+
+
+class GainEvasiveDuringTurnEffect(Effect):
+    """Gain Evasive during controller's turn."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        game_state = context.get('game_state')
+        if (hasattr(target, 'controller') and 
+            hasattr(game_state, 'current_player') and 
+            target.controller == game_state.current_player):
+            if hasattr(target, 'add_temporary_modifier'):
+                target.add_temporary_modifier(evasive=True, duration="turn")
+        return target
+    
+    def __str__(self) -> str:
+        return "gain Evasive during your turn"
+
+
+# Factory functions for parameterized effects
+def GAIN_LORE(amount: int):
+    return GainLoreEffect(amount)
+
+def GAIN_CHALLENGER_BUFF(amount: int, duration: str = "turn"):
+    return GainChallengerBuffEffect(amount, duration)
+
+def RETURN_SELF_TO_HAND(condition_func: Callable[[Any, Dict], bool] = None):
+    return ReturnSelfToHandEffect(condition_func)
+
+
+# Pre-built named ability effects
+PREVENT_SINGING = PreventSingingEffect()
+REMOVE_DAMAGE_3 = RemoveDamageEffect(3, up_to=True)
+REMOVE_DAMAGE_2 = RemoveDamageEffect(2, up_to=True)
+RETURN_CHARACTER_TO_HAND = ReturnCardToHandEffect(lambda card: hasattr(card, 'card_type') and card.card_type == 'Character')
+LOOK_AT_TOP_4 = DeckManipulationEffect(4, lambda card: 'Song' in getattr(card, 'card_type', ''), reveal=True)
+BANISH_TARGET = BanishTargetEffect()
+TEMP_STRENGTH_MINUS_2 = TemporaryStatModification(strength=-2)
+TEMP_STRENGTH_PLUS_2 = TemporaryStatModification(strength=2)
+DRAW_CARD = DrawCards(1)
+GAIN_LORE_EQUAL_TO_TARGET_LORE = GainLoreEqualToTargetLoreEffect()
+EXERT_ALL_OPPOSING_CHARACTERS = ExertAllOpposingCharactersEffect()
+EACH_OPPONENT_EXERTS_READY_CHARACTER = EachOpponentExertsReadyCharacterEffect()
+GAIN_EVASIVE_DURING_TURN = GainEvasiveDuringTurnEffect()

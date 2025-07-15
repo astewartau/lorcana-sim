@@ -305,3 +305,123 @@ DAMAGED_CHARACTER = CharacterSelector(damaged_filter)
 ALL_CHARACTERS = CharacterSelector(lambda c, ctx: True, count=999)
 ALL_OTHER_CHARACTERS = CharacterSelector(not_self_filter, count=999)
 BODYGUARD_CHARACTER = CharacterSelector(bodyguard_filter)
+
+
+class PlayerSelector(TargetSelector):
+    """Select players based on filter."""
+    
+    def __init__(self, filter_func: Callable[[Any, Dict], bool] = None, count: int = 1):
+        self.filter_func = filter_func
+        self.count = count
+    
+    def select(self, context: Dict[str, Any]) -> List[Any]:
+        game_state = context.get('game_state')
+        if not game_state:
+            event_context = context.get('event_context')
+            if event_context:
+                game_state = event_context.game_state
+        
+        if not game_state:
+            return []
+        
+        # Get ability owner to determine controller
+        ability_owner = context.get('ability_owner')
+        if ability_owner and hasattr(ability_owner, 'controller'):
+            controller = ability_owner.controller
+            if self.filter_func is None:  # Default to controller when no filter
+                return [controller]
+        
+        # Get all players
+        all_players = []
+        if hasattr(game_state, 'players'):
+            all_players = game_state.players
+        elif hasattr(game_state, 'current_player') and hasattr(game_state, 'opponent'):
+            all_players = [game_state.current_player, game_state.opponent]
+        
+        # Apply filter if we have one
+        if self.filter_func:
+            valid_players = [player for player in all_players 
+                            if self.filter_func(player, context)]
+        else:
+            # No filter means select all players
+            valid_players = all_players
+        
+        return valid_players[:self.count]
+
+
+def opposing_player_filter(player: Any, context: Dict[str, Any]) -> bool:
+    """Filter for opposing players."""
+    ability_owner = context.get('ability_owner')
+    if ability_owner and hasattr(ability_owner, 'controller'):
+        return player != ability_owner.controller
+    return False
+
+
+class TargetWithCostConstraintSelector(TargetSelector):
+    """Select targets with cost constraints."""
+    
+    def __init__(self, cost_constraint: Callable[[Any], bool], valid_types: List[str] = None, count: int = 1):
+        self.cost_constraint = cost_constraint
+        self.valid_types = valid_types or ['character', 'item', 'location']
+        self.count = count
+    
+    def select(self, context: Dict[str, Any]) -> List[Any]:
+        game_state = context.get('game_state')
+        if not game_state:
+            event_context = context.get('event_context')
+            if event_context:
+                game_state = event_context.game_state
+        
+        if not game_state:
+            return []
+        
+        # Get all valid targets from all players
+        all_targets = []
+        if hasattr(game_state, 'players'):
+            for player in game_state.players:
+                if 'character' in self.valid_types and hasattr(player, 'characters_in_play'):
+                    all_targets.extend(player.characters_in_play)
+                if 'item' in self.valid_types and hasattr(player, 'items_in_play'):
+                    all_targets.extend(player.items_in_play)
+                if 'location' in self.valid_types and hasattr(player, 'locations_in_play'):
+                    all_targets.extend(player.locations_in_play)
+        
+        # Apply cost constraint
+        valid_targets = [target for target in all_targets 
+                        if self.cost_constraint(target)]
+        
+        return valid_targets[:self.count]
+
+
+def TARGET_WITH_COST_CONSTRAINT(cost_constraint: Callable[[Any], bool], valid_types: List[str] = None):
+    return TargetWithCostConstraintSelector(cost_constraint, valid_types)
+
+
+# Player selectors (defined after PlayerSelector class)
+CONTROLLER = PlayerSelector()
+ALL_OPPONENTS = PlayerSelector(opposing_player_filter, count=999)
+
+
+# =============================================================================
+# FILTER COMBINATION FUNCTIONS
+# =============================================================================
+
+def and_filters(*filters):
+    """Combine multiple filters with AND logic."""
+    def combined_filter(character: Any, context: Dict[str, Any]) -> bool:
+        return all(f(character, context) for f in filters)
+    return combined_filter
+
+
+def or_filters(*filters):
+    """Combine multiple filters with OR logic."""
+    def combined_filter(character: Any, context: Dict[str, Any]) -> bool:
+        return any(f(character, context) for f in filters)
+    return combined_filter
+
+
+def not_filter(filter_func):
+    """Negate a filter."""
+    def negated_filter(character: Any, context: Dict[str, Any]) -> bool:
+        return not filter_func(character, context)
+    return negated_filter

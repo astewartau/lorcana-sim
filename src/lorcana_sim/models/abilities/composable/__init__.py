@@ -21,6 +21,7 @@ from .target_selectors import (
     # Filter functions
     friendly_filter, enemy_filter, ready_filter, exerted_filter, damaged_filter, undamaged_filter,
     has_ability_filter, cost_filter, subtype_filter, not_self_filter, bodyguard_filter,
+    and_filters, or_filters, not_filter,
     # Pre-built selectors
     SELF, EVENT_TARGET, EVENT_SOURCE, NO_TARGET,
     FRIENDLY_CHARACTER, FRIENDLY_READY, FRIENDLY_EXERTED, FRIENDLY_DAMAGED, ALL_FRIENDLY, OTHER_FRIENDLY,
@@ -37,6 +38,9 @@ from .triggers import (
     when_targeted_by_ability, when_challenge_declared_against, when_damage_would_be_dealt_to,
     when_song_cast_attempted, and_conditions, or_conditions, not_condition, metadata_condition
 )
+
+# Import named abilities to register them
+from . import named_abilities
 
 __all__ = [
     # Core classes
@@ -59,6 +63,7 @@ __all__ = [
     'EventTargetSelector', 'EventSourceSelector', 'UnionSelector', 'DifferenceSelector', 'IntersectionSelector',
     'friendly_filter', 'enemy_filter', 'ready_filter', 'exerted_filter', 'damaged_filter', 'undamaged_filter',
     'has_ability_filter', 'cost_filter', 'subtype_filter', 'not_self_filter', 'bodyguard_filter',
+    'and_filters', 'or_filters', 'not_filter',
     'SELF', 'EVENT_TARGET', 'EVENT_SOURCE', 'NO_TARGET',
     'FRIENDLY_CHARACTER', 'FRIENDLY_READY', 'FRIENDLY_EXERTED', 'FRIENDLY_DAMAGED', 'ALL_FRIENDLY', 'OTHER_FRIENDLY',
     'ENEMY_CHARACTER', 'ENEMY_EXERTED', 'ENEMY_DAMAGED', 'ALL_ENEMIES',

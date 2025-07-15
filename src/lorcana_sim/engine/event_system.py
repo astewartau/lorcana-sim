@@ -49,6 +49,18 @@ class GameEvent(Enum):
     # Game state events
     GAME_BEGINS = "game_begins"
     GAME_ENDS = "game_ends"
+    
+    # Named ability specific events
+    CHARACTER_BANISHED_IN_CHALLENGE = "character_banished_in_challenge"
+    CHALLENGE_DECLARED = "challenge_declared"
+    CHALLENGE_RESOLVED = "challenge_resolved"
+    CARD_RETURNED_TO_HAND = "card_returned_to_hand"
+    CHARACTER_READIED = "character_readied"
+    CHARACTER_EXERTS = "character_exerts"
+    CHARACTER_MOVES_TO_LOCATION = "character_moves_to_location"
+    ABILITY_ACTIVATED = "ability_activated"
+    DECK_MANIPULATED = "deck_manipulated"
+    CARD_REVEALED = "card_revealed"
 
 
 @dataclass
@@ -60,6 +72,13 @@ class EventContext:
     player: Any = None  # The player who controls the source
     game_state: 'GameState' = None
     additional_data: Dict[str, Any] = None
+    
+    # Enhanced context for named abilities
+    banishment_cause: Optional[str] = None  # "challenge", "ability", etc.
+    turn_phase: Optional[str] = None
+    ability_source: Optional[Any] = None  # Which ability caused this event
+    damage_amount: Optional[int] = None  # For damage-related events
+    cards_revealed: Optional[List[Any]] = None  # For deck manipulation events
     
     def __post_init__(self):
         if self.additional_data is None:
@@ -154,11 +173,31 @@ class GameEventManager:
                         self.step_engine.queue_steps(steps)
                         results.append(f"Queued steps for ability: {ability.name}")
                 else:
-                    # Execute immediately for simple abilities
-                    ability.handle_event(event_context)
-                    results.append(f"Triggered composable ability: {ability.name}")
+                    # Execute immediately for simple abilities - only log if something actually triggered
+                    triggered = False
+                    for listener in ability.listeners:
+                        if listener.should_trigger(event_context):
+                            triggered = True
+                            break
+                    
+                    if triggered:
+                        ability.handle_event(event_context)
+                        # Get effect details for more informative output
+                        effect_details = []
+                        for listener in ability.listeners:
+                            if listener.should_trigger(event_context):
+                                effect_details.append(str(listener.effect))
+                        
+                        if effect_details:
+                            results.append(f"Triggered {ability.name}: {', '.join(effect_details)}")
+                        else:
+                            results.append(f"Triggered composable ability: {ability.name}")
             except Exception as e:
                 results.append(f"Error executing composable ability {ability}: {str(e)}")
+        
+        # Evaluate passive abilities after event processing
+        passive_results = self._evaluate_passive_abilities()
+        results.extend(passive_results)
         
         return results
     
@@ -181,6 +220,24 @@ class GameEventManager:
     def clear_paused_events(self) -> None:
         """Clear all paused events."""
         self._paused_events.clear()
+    
+    def _evaluate_passive_abilities(self) -> List[str]:
+        """Evaluate all passive abilities and return any state changes."""
+        results = []
+        
+        # Check if we have any passive abilities registered
+        if not hasattr(self, 'passive_abilities'):
+            return results
+        
+        for passive_ability in self.passive_abilities:
+            try:
+                change_message = passive_ability.evaluate_condition(self.game_state)
+                if change_message:
+                    results.append(change_message)
+            except Exception as e:
+                results.append(f"Error evaluating passive ability {passive_ability}: {str(e)}")
+        
+        return results
     
     def rebuild_listeners(self):
         """Rebuild the composable ability listener registry from current game state."""

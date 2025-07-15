@@ -41,6 +41,7 @@ class CharacterCard(Card):
     lore_bonuses: List[Tuple[int, str]] = field(default_factory=list)
     strength_bonuses: List[Tuple[int, str]] = field(default_factory=list)
     willpower_bonuses: List[Tuple[int, str]] = field(default_factory=list)
+    challenger_bonuses: List[Tuple[int, str]] = field(default_factory=list)
     
     def __post_init__(self) -> None:
         """Validate character card data after creation."""
@@ -86,6 +87,11 @@ class CharacterCard(Card):
         for amount, duration in self.lore_bonuses:
             base += amount
         return max(0, base)
+    
+    @property
+    def current_challenger_bonus(self) -> int:
+        """Get current challenger bonus."""
+        return sum(amount for amount, duration in self.challenger_bonuses)
     
     def deal_damage(self, 
                    amount: int, 
@@ -146,6 +152,15 @@ class CharacterCard(Card):
         # Check metadata set by Rush ability
         return self.metadata.get('can_challenge_with_wet_ink', False)
     
+    def has_evasive_ability(self) -> bool:
+        """Check if character has Evasive ability."""
+        # Check composable abilities for Evasive
+        for ability in self.composable_abilities:
+            if 'evasive' in ability.name.lower():
+                return True
+        # Check metadata set by temporary effects
+        return self.metadata.get('has_evasive', False)
+    
     def can_quest(self, current_turn: int) -> bool:
         """Check if this character can quest.
         
@@ -202,11 +217,37 @@ class CharacterCard(Card):
         """Add a willpower bonus to this character."""
         self.willpower_bonuses.append((amount, duration))
     
+    def add_challenger_bonus(self, amount: int, duration: str) -> None:
+        """Add a challenger bonus to this character."""
+        self.challenger_bonuses.append((amount, duration))
+    
+    def add_temporary_modifier(self, **kwargs) -> None:
+        """Add temporary modifiers to this character."""
+        duration = kwargs.get('duration', 'turn')
+        
+        if 'strength' in kwargs:
+            self.add_strength_bonus(kwargs['strength'], duration)
+        if 'willpower' in kwargs:
+            self.add_willpower_bonus(kwargs['willpower'], duration)
+        if 'lore' in kwargs:
+            self.add_lore_bonus(kwargs['lore'], duration)
+        if 'challenger_bonus' in kwargs:
+            self.add_challenger_bonus(kwargs['challenger_bonus'], duration)
+        if 'evasive' in kwargs:
+            self.metadata['has_evasive'] = kwargs['evasive']
+        if 'rush' in kwargs:
+            self.metadata['has_rush'] = kwargs['rush']
+        if 'bodyguard' in kwargs:
+            self.metadata['has_bodyguard'] = kwargs['bodyguard']
+        if 'ward' in kwargs:
+            self.metadata['has_ward'] = kwargs['ward']
+    
     def clear_temporary_bonuses(self) -> None:
         """Clear all 'this_turn' bonuses at end of turn."""
         self.lore_bonuses = [(amount, duration) for amount, duration in self.lore_bonuses if duration != "this_turn"]
         self.strength_bonuses = [(amount, duration) for amount, duration in self.strength_bonuses if duration != "this_turn"]
         self.willpower_bonuses = [(amount, duration) for amount, duration in self.willpower_bonuses if duration != "this_turn"]
+        self.challenger_bonuses = [(amount, duration) for amount, duration in self.challenger_bonuses if duration != "this_turn"]
     
     # Composable Ability Integration Methods
     def register_composable_abilities(self, event_manager: 'GameEventManager') -> None:

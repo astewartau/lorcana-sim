@@ -92,9 +92,14 @@ def when_leaves_play(character: Any) -> Callable[[EventContext], bool]:
 
 
 def when_banished(character: Any) -> Callable[[EventContext], bool]:
-    """Trigger when this specific character is banished."""
-    return when_event(GameEvent.CHARACTER_BANISHED,
-                     source_filter=lambda src, ctx: src == character)
+    """Trigger when this specific character is banished, or any character if character is None."""
+    if character is None:
+        # Listen for any character being banished
+        return when_event(GameEvent.CHARACTER_BANISHED)
+    else:
+        # Listen for specific character being banished
+        return when_event(GameEvent.CHARACTER_BANISHED,
+                         source_filter=lambda src, ctx: src == character)
 
 
 # Damage triggers
@@ -305,3 +310,147 @@ def get_relevant_events_for_trigger(trigger_condition: Callable) -> list[GameEve
     # This is a simplified version - in production we'd parse the condition
     # For now, return all events and optimize later
     return list(GameEvent)
+
+
+# =============================================================================
+# NAMED ABILITY SPECIFIC TRIGGERS
+# =============================================================================
+
+def when_banished_in_challenge(character: Any) -> Callable[[EventContext], bool]:
+    """Trigger when this character is banished specifically in a challenge."""
+    return when_event(GameEvent.CHARACTER_BANISHED_IN_CHALLENGE,
+                     source_filter=lambda src, ctx: src == character)
+
+
+def when_character_type_enters_play(character_type: str, controller: Any = None) -> Callable[[EventContext], bool]:
+    """Trigger when a character of specific type enters play."""
+    def condition(event_context: EventContext) -> bool:
+        if event_context.event_type != GameEvent.CHARACTER_ENTERS_PLAY:
+            return False
+        
+        character = event_context.source
+        if not character:
+            return False
+            
+        # Check character type/subtype
+        if hasattr(character, 'subtypes') and character_type in character.subtypes:
+            # Check controller if specified
+            if controller and hasattr(character, 'controller'):
+                return character.controller == controller
+            return True
+        
+        return False
+    
+    condition.get_relevant_events = lambda: [GameEvent.CHARACTER_ENTERS_PLAY]
+    return condition
+
+
+def when_character_type_leaves_play(character_type: str, controller: Any = None) -> Callable[[EventContext], bool]:
+    """Trigger when a character of specific type leaves play."""
+    def condition(event_context: EventContext) -> bool:
+        if event_context.event_type != GameEvent.CHARACTER_LEAVES_PLAY:
+            return False
+        
+        character = event_context.source
+        if not character:
+            return False
+            
+        # Check character type/subtype
+        if hasattr(character, 'subtypes') and character_type in character.subtypes:
+            # Check controller if specified
+            if controller and hasattr(character, 'controller'):
+                return character.controller == controller
+            return True
+        
+        return False
+    
+    condition.get_relevant_events = lambda: [GameEvent.CHARACTER_LEAVES_PLAY]
+    return condition
+
+
+def when_character_name_enters_play(character_name: str, controller: Any = None) -> Callable[[EventContext], bool]:
+    """Trigger when a character with specific name enters play."""
+    def condition(event_context: EventContext) -> bool:
+        if event_context.event_type != GameEvent.CHARACTER_ENTERS_PLAY:
+            return False
+        
+        character = event_context.source
+        if not character:
+            return False
+            
+        # Check character name
+        if hasattr(character, 'name') and character_name in character.name:
+            # Check controller if specified
+            if controller and hasattr(character, 'controller'):
+                return character.controller == controller
+            return True
+        
+        return False
+    
+    condition.get_relevant_events = lambda: [GameEvent.CHARACTER_ENTERS_PLAY]
+    return condition
+
+
+def when_character_name_leaves_play(character_name: str, controller: Any = None) -> Callable[[EventContext], bool]:
+    """Trigger when a character with specific name leaves play."""
+    def condition(event_context: EventContext) -> bool:
+        if event_context.event_type != GameEvent.CHARACTER_LEAVES_PLAY:
+            return False
+        
+        character = event_context.source
+        if not character:
+            return False
+            
+        # Check character name
+        if hasattr(character, 'name') and character_name in character.name:
+            # Check controller if specified
+            if controller and hasattr(character, 'controller'):
+                return character.controller == controller
+            return True
+        
+        return False
+    
+    condition.get_relevant_events = lambda: [GameEvent.CHARACTER_LEAVES_PLAY]
+    return condition
+
+
+def when_ability_activated(character: Any, ability_name: str) -> Callable[[EventContext], bool]:
+    """Trigger when specific activated ability is used."""
+    return when_event(GameEvent.ABILITY_ACTIVATED,
+                     source_filter=lambda src, ctx: src == character,
+                     metadata_filter=lambda meta, ctx: meta.get('ability_name') == ability_name)
+
+
+def on_activation() -> Callable[[EventContext], bool]:
+    """Trigger for activated abilities."""
+    return when_event(GameEvent.ABILITY_ACTIVATED)
+
+
+def when_turn_starts(player: Any = None) -> Callable[[EventContext], bool]:
+    """Trigger at start of turn (optionally specific player's turn)."""
+    if player:
+        return when_event(GameEvent.TURN_BEGINS,
+                         metadata_filter=lambda meta, ctx: ctx.player == player)
+    return when_event(GameEvent.TURN_BEGINS)
+
+
+def when_character_exerts(character: Any = None) -> Callable[[EventContext], bool]:
+    """Trigger when a character is exerted."""
+    if character:
+        return when_event(GameEvent.CHARACTER_EXERTS,
+                         source_filter=lambda src, ctx: src == character)
+    return when_event(GameEvent.CHARACTER_EXERTS)
+
+
+def when_character_readies(character: Any = None) -> Callable[[EventContext], bool]:
+    """Trigger when a character readies."""
+    if character:
+        return when_event(GameEvent.CHARACTER_READIED,
+                         source_filter=lambda src, ctx: src == character)
+    return when_event(GameEvent.CHARACTER_READIED)
+
+
+def when_moves_to_location(character: Any) -> Callable[[EventContext], bool]:
+    """Trigger when a character moves to a location."""
+    return when_event(GameEvent.CHARACTER_MOVES_TO_LOCATION,
+                     source_filter=lambda src, ctx: src == character)

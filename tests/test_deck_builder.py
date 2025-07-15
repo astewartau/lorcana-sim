@@ -12,8 +12,6 @@ from lorcana_sim.loaders.lorcana_json_parser import LorcanaJsonParser
 def deck_builder():
     """Create a deck builder with real card data."""
     data_path = Path("data/all-cards/allCards.json")
-    if not data_path.exists():
-        pytest.skip("Card database not found")
     
     parser = LorcanaJsonParser(str(data_path))
     return DeckBuilder(parser.cards)
@@ -48,10 +46,10 @@ def test_deck_builder_statistics(deck_builder):
     assert len(stats["by_type"]) > 0
     assert len(stats["by_cost"]) > 0
     
-    print(f"Database contains {stats['total_cards']} cards")
-    print(f"Colors: {list(stats['by_color'].keys())}")
-    print(f"Types: {list(stats['by_type'].keys())}")
-    print(f"Cost range: {stats['cost_range']}")
+    assert 'total_cards' in stats
+    assert 'by_color' in stats
+    assert 'by_type' in stats
+    assert 'cost_range' in stats
 
 
 def test_build_random_deck(deck_builder):
@@ -67,7 +65,8 @@ def test_build_random_deck(deck_builder):
     assert legal is True
     assert len(errors) == 0
     
-    print(f"Random deck: {deck.get_summary()}")
+    summary = deck.get_summary()
+    assert summary is not None
 
 
 def test_build_mono_color_decks(deck_builder):
@@ -91,7 +90,7 @@ def test_build_mono_color_decks(deck_builder):
             primary_count = color_dist.get(color.value, 0)
             assert primary_count > deck.total_cards * 0.8  # At least 80% primary color
             
-            print(f"{color.value} deck: {primary_count}/{deck.total_cards} cards")
+            assert primary_count > 0, f"{color.value} deck should have primary color cards"
     
     assert successful_decks >= 2, f"Only created {successful_decks} mono-color decks"
 
@@ -100,8 +99,7 @@ def test_build_aggro_deck(deck_builder):
     """Test building an aggro deck."""
     deck = deck_builder.build_aggro_deck(CardColor.RUBY, seed=42)
     
-    if deck is None:
-        pytest.skip("Could not build aggro deck with available cards")
+    assert deck is not None, "Should be able to build aggro deck with available cards"
     
     assert deck.total_cards <= 60
     assert deck.unique_cards > 0
@@ -116,16 +114,14 @@ def test_build_aggro_deck(deck_builder):
     
     assert low_cost_cards > total_cards * 0.4  # At least 40% low-cost
     
-    print(f"Aggro deck cost curve: {cost_curve}")
-    print(f"Low-cost cards: {low_cost_cards}/{total_cards}")
+    assert len(cost_curve) > 0, "Aggro deck should have cards at multiple cost levels"
 
 
 def test_build_control_deck(deck_builder):
     """Test building a control deck."""
     deck = deck_builder.build_control_deck(CardColor.SAPPHIRE, seed=42)
     
-    if deck is None:
-        pytest.skip("Could not build control deck with available cards")
+    assert deck is not None, "Should be able to build control deck with available cards"
     
     assert deck.total_cards <= 60
     legal, errors = deck.is_legal()
@@ -138,8 +134,7 @@ def test_build_control_deck(deck_builder):
     
     assert high_cost_cards > total_cards * 0.2  # At least 20% high-cost
     
-    print(f"Control deck cost curve: {cost_curve}")
-    print(f"High-cost cards: {high_cost_cards}/{total_cards}")
+    assert len(cost_curve) > 0, "Control deck should have cards at multiple cost levels"
 
 
 def test_build_tribal_deck(deck_builder):
@@ -162,7 +157,7 @@ def test_build_tribal_deck(deck_builder):
             if deck.total_cards == 60:
                 assert legal is True
             
-            print(f"{subtype} tribal deck: {deck.total_cards} cards, {deck.unique_cards} unique")
+            assert deck.total_cards > 0, f"{subtype} tribal deck should have cards"
             
             # Check that we have characters with the subtype
             type_dist = deck.get_type_distribution()
@@ -177,8 +172,7 @@ def test_build_balanced_deck(deck_builder):
     colors = [CardColor.AMBER, CardColor.STEEL]
     deck = deck_builder.build_balanced_deck(colors, seed=42)
     
-    if deck is None:
-        pytest.skip("Could not build balanced deck with available cards")
+    assert deck is not None, "Should be able to build balanced deck with available cards"
     
     assert deck.total_cards <= 60
     legal, errors = deck.is_legal()
@@ -195,8 +189,8 @@ def test_build_balanced_deck(deck_builder):
     cost_curve = deck.get_cost_curve()
     assert len(cost_curve) >= 3  # Should have cards at multiple cost levels
     
-    print(f"Balanced deck colors: {color_dist}")
-    print(f"Balanced deck curve: {cost_curve}")
+    assert len(color_dist) > 0, "Balanced deck should have color distribution"
+    assert len(cost_curve) > 0, "Balanced deck should have cost curve"
 
 
 def test_deck_builder_edge_cases(deck_builder):
@@ -251,4 +245,5 @@ def test_multiple_deck_generation(deck_builder):
     
     assert len(unique_summaries) > 1, "Generated decks should be different from each other"
     
-    print(f"Generated {len(decks)} decks, {len(unique_summaries)} unique configurations")
+    assert len(decks) > 0, "Should have generated some decks"
+    assert len(unique_summaries) > 0, "Should have unique deck configurations"

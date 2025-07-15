@@ -67,6 +67,9 @@ class GameState:
     consecutive_passes: int = 0  # Track consecutive pass actions
     max_consecutive_passes: int = 4  # Both players pass twice = stalemate
     
+    # Last event tracking for inspection
+    last_event: Optional[Dict[str, Any]] = None  # The most recent event that occurred
+    
     def __post_init__(self) -> None:
         """Validate game state after creation."""
         if len(self.players) < 2:
@@ -160,24 +163,70 @@ class GameState:
         if self.current_player_index == 0:
             self.turn_number += 1
         
-        # Update character dry status after turn changes
-        self._update_character_dry_status()
+        # Update character dry status after turn changes (but not for current player - they'll update in ready phase)
+        self._update_character_dry_status_except_current()
         
-        # Start ready phase for new player
+        # Start ready phase for new player (but don't execute ready_step yet)
         self.current_phase = Phase.READY
-        self.ready_step()
     
-    def ready_step(self) -> None:
-        """Execute the ready step (ready all cards and start turn)."""
+    def ready_step(self) -> List[str]:
+        """Execute the ready step (ready all cards and start turn).
+        
+        Returns:
+            List of descriptions of items that were readied.
+        """
         current_player = self.current_player
+        readied_items = []
+        
+        # Get list of exerted characters before readying
+        exerted_characters = [char for char in current_player.characters_in_play if char.exerted]
+        
+        # Update dry status for current player's characters (happens during ready phase)
+        for char in current_player.characters_in_play:
+            if char.turn_played is not None:
+                # Ink dries at start of owner's next turn
+                old_dry_status = char.is_dry
+                char.is_dry = self.turn_number > char.turn_played
+                # Track characters that just dried
+                if not old_dry_status and char.is_dry and not char.exerted:
+                    readied_items.append(f"{char.name} ink dried")
+            else:
+                # Character wasn't played this game (already dry)
+                char.is_dry = True
         
         # Start the turn (reset ink usage, ready characters)
         current_player.start_turn()
         
+        # Track which characters were readied from exerted state
+        for char in exerted_characters:
+            readied_items.append(f"{char.name} readied")
+        
         # Ready all items
-        for item in current_player.items_in_play:
-            if hasattr(item, 'exerted'):
-                item.exerted = False
+        exerted_items = [item for item in current_player.items_in_play 
+                        if hasattr(item, 'exerted') and item.exerted]
+        for item in exerted_items:
+            item.exerted = False
+            readied_items.append(f"{item.name} (item) readied")
+        
+        return readied_items
+    
+    def set_last_event(self, event_type: str, **event_data) -> None:
+        """Set the last event that occurred for inspection."""
+        self.last_event = {
+            'type': event_type,
+            'turn': self.turn_number,
+            'phase': self.current_phase.value,
+            'timestamp': len(self.actions_this_turn),  # Simple event ordering
+            **event_data
+        }
+    
+    def get_last_event(self) -> Optional[Dict[str, Any]]:
+        """Get the last event that occurred."""
+        return self.last_event
+    
+    def clear_last_event(self) -> None:
+        """Clear the last event."""
+        self.last_event = None
     
     def set_step(self) -> None:
         """Execute the set step (resolve start-of-turn effects)."""
@@ -185,9 +234,14 @@ class GameState:
         # TODO: Implement start-of-turn ability resolution here
         pass
     
-    def draw_step(self) -> None:
-        """Execute the draw step (draw a card)."""
+    def draw_step(self) -> List[str]:
+        """Execute the draw step (draw a card).
+        
+        Returns:
+            List of descriptions of draw events that occurred.
+        """
         current_player = self.current_player
+        draw_events = []
         
         # Draw card (skip on first turn for first player)
         should_draw = not (self.turn_number == 1 and 
@@ -195,9 +249,16 @@ class GameState:
                           not self.first_turn_draw_skipped)
         
         if should_draw:
-            current_player.draw_card()
+            drawn_card = current_player.draw_card()
+            if drawn_card:
+                draw_events.append(f"{current_player.name} drew {drawn_card.name}")
+            else:
+                draw_events.append(f"{current_player.name} attempted to draw but deck is empty")
         elif self.turn_number == 1 and self.current_player_index == 0:
             self.first_turn_draw_skipped = True
+            draw_events.append(f"{current_player.name} skipped first turn draw")
+        
+        return draw_events
     
     def can_play_ink(self) -> bool:
         """Check if current player can play ink."""
@@ -255,6 +316,22 @@ class GameState:
                 else:
                     # Character wasn't played this game (already dry)
                     char.is_dry = True
+    
+    def _update_character_dry_status_except_current(self) -> None:
+        """Update dry status for all characters except current player (they update during ready phase)."""
+        current_player = self.current_player
+        for player in self.players:
+            if player != current_player:
+                for char in player.characters_in_play:
+                    if char.turn_played is not None:
+                        # Ink dries at start of owner's next turn, not just any turn
+                        # Only update if this character belongs to a player whose turn just started
+                        # Since this is called during end_turn, we should NOT update dry status here
+                        # Dry status updates only happen during the character owner's ready phase
+                        pass
+                    else:
+                        # Character wasn't played this game (already dry)
+                        char.is_dry = True
     
     def __str__(self) -> str:
         """String representation of the game state."""

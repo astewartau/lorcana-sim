@@ -1,0 +1,1 @@
+"""Integration tests for named abilities organized by ability type."""

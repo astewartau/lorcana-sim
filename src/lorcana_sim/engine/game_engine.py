@@ -1,6 +1,6 @@
 """Game engine for executing actions and managing state transitions."""
 
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 from ..models.game.game_state import GameState, GameAction, Phase
 from ..models.cards.character_card import CharacterCard
 from ..models.cards.action_card import ActionCard
@@ -10,6 +10,7 @@ from .move_validator import MoveValidator
 from .event_system import GameEventManager, GameEvent, EventContext
 from .damage_calculator import DamageCalculator, DamageType
 from .action_result import ActionResult, ActionResultType
+from .choice_system import GameChoiceManager, ChoiceContext
 
 
 class GameEngine:
@@ -20,13 +21,57 @@ class GameEngine:
         self.validator = MoveValidator(game_state)
         self.event_manager = GameEventManager(game_state)
         self.damage_calculator = DamageCalculator(game_state)
+        self.choice_manager = GameChoiceManager()
         # Register all triggered abilities from characters currently in play
         self.event_manager.rebuild_listeners()
+    
+    def start_game(self):
+        """Start the game by triggering the initial TURN_BEGINS event."""
+        current_player = self.game_state.current_player
+        turn_begin_context = EventContext(
+            event_type=GameEvent.TURN_BEGINS,
+            player=current_player,
+            game_state=self.game_state,
+            additional_data={'turn_number': self.game_state.turn_number}
+        )
+        self.event_manager.trigger_event(turn_begin_context)
+    
+    def get_last_event(self) -> Optional[Dict[str, Any]]:
+        """Get the last event that occurred for inspection."""
+        return self.game_state.get_last_event()
+    
+    def clear_last_event(self) -> None:
+        """Clear the last event."""
+        self.game_state.clear_last_event()
+    
+    def trigger_event_with_choices(self, event_context: EventContext) -> List[str]:
+        """Trigger an event with choice manager included in the context."""
+        # Add choice manager to the event context's additional data
+        if not event_context.additional_data:
+            event_context.additional_data = {}
+        event_context.additional_data['choice_manager'] = self.choice_manager
+        
+        return self.event_manager.trigger_event(event_context)
     
     def draw_card_with_events(self, player):
         """Draw a card for a player and trigger CARD_DRAWN event."""
         card = player.draw_card()
         if card:
+            # Set the last event with structured data
+            source = "normal_draw"
+            if self.game_state.current_phase.value == "draw":
+                source = "draw_phase"
+            
+            self.game_state.set_last_event(
+                'CARD_DRAWN',
+                player=player.name,
+                cards_drawn=[card],
+                count=1,
+                source=source,
+                hand_size_after=len(player.hand),
+                deck_size_after=len(player.deck)
+            )
+            
             # Trigger CARD_DRAWN event
             draw_context = EventContext(
                 event_type=GameEvent.CARD_DRAWN,
@@ -162,7 +207,7 @@ class GameEngine:
                 player=current_player,
                 game_state=self.game_state
             )
-            trigger_results = self.event_manager.trigger_event(enters_context)
+            trigger_results = self.trigger_event_with_choices(enters_context)
             
             # Trigger CHARACTER_PLAYED event (specific to playing from hand)
             played_context = EventContext(
@@ -171,7 +216,7 @@ class GameEngine:
                 player=current_player,
                 game_state=self.game_state
             )
-            played_results = self.event_manager.trigger_event(played_context)
+            played_results = self.trigger_event_with_choices(played_context)
             if played_results:
                 trigger_results.extend(played_results)
             
@@ -404,20 +449,32 @@ class GameEngine:
             )
             self.event_manager.trigger_event(leaves_context)
             
-            current_player.characters_in_play.remove(attacker)
-            current_player.discard_pile.append(attacker)
-            # Unregister abilities from banished character
-            for ability in attacker.abilities:
-                self.event_manager.unregister_triggered_ability(ability)
-            
-            # Trigger CHARACTER_BANISHED event (specific to banishment)
+            # Trigger CHARACTER_BANISHED event BEFORE unregistering abilities
             banish_context = EventContext(
                 event_type=GameEvent.CHARACTER_BANISHED,
                 source=attacker,
                 player=current_player,
+                game_state=self.game_state,
+                banishment_cause="challenge"
+            )
+            self.trigger_event_with_choices(banish_context)
+            
+            # Trigger CHARACTER_BANISHED_IN_CHALLENGE event for abilities that specifically care
+            challenge_banish_context = EventContext(
+                event_type=GameEvent.CHARACTER_BANISHED_IN_CHALLENGE,
+                source=attacker,
+                player=current_player,
                 game_state=self.game_state
             )
-            self.event_manager.trigger_event(banish_context)
+            self.trigger_event_with_choices(challenge_banish_context)
+            
+            # Now remove from play and unregister abilities
+            # Note: Some abilities like RECURRING GUST may have already moved the character to hand
+            if attacker in current_player.characters_in_play:
+                current_player.characters_in_play.remove(attacker)
+                current_player.discard_pile.append(attacker)
+            # Unregister composable abilities from banished character
+            attacker.unregister_composable_abilities(self.event_manager)
             banished_characters.append(attacker.name)
         
         if not defender.is_alive:
@@ -431,20 +488,32 @@ class GameEngine:
             )
             self.event_manager.trigger_event(leaves_context)
             
-            opponent.characters_in_play.remove(defender)
-            opponent.discard_pile.append(defender)
-            # Unregister abilities from banished character
-            for ability in defender.abilities:
-                self.event_manager.unregister_triggered_ability(ability)
-            
-            # Trigger CHARACTER_BANISHED event (specific to banishment)
+            # Trigger CHARACTER_BANISHED event BEFORE unregistering abilities
             banish_context = EventContext(
                 event_type=GameEvent.CHARACTER_BANISHED,
                 source=defender,
                 player=opponent,
+                game_state=self.game_state,
+                banishment_cause="challenge"
+            )
+            self.trigger_event_with_choices(banish_context)
+            
+            # Trigger CHARACTER_BANISHED_IN_CHALLENGE event for abilities that specifically care
+            challenge_banish_context = EventContext(
+                event_type=GameEvent.CHARACTER_BANISHED_IN_CHALLENGE,
+                source=defender,
+                player=opponent,
                 game_state=self.game_state
             )
-            self.event_manager.trigger_event(banish_context)
+            self.trigger_event_with_choices(challenge_banish_context)
+            
+            # Now remove from play and unregister abilities
+            # Note: Some abilities like RECURRING GUST may have already moved the character to hand
+            if defender in opponent.characters_in_play:
+                opponent.characters_in_play.remove(defender)
+                opponent.discard_pile.append(defender)
+            # Unregister composable abilities from banished character
+            defender.unregister_composable_abilities(self.event_manager)
             banished_characters.append(defender.name)
         
         self.game_state.actions_this_turn.append(GameAction.CHALLENGE_CHARACTER)
@@ -550,6 +619,10 @@ class GameEngine:
                 )
                 self.event_manager.trigger_event(ready_context)
                 
+                # Don't execute ready step here - let the stepped engine handle it
+                # Mark that ready step needs to be executed
+                self.game_state._needs_ready_step = True
+                
                 return ActionResult.success_result(
                     action_type=GameAction.PROGRESS,
                     result_type=ActionResultType.TURN_ENDED,
@@ -596,7 +669,7 @@ class GameEngine:
                     game_state=self.game_state
                 )
                 self.event_manager.trigger_event(draw_context)
-                self._execute_draw_step()
+                draw_events = self.game_state.draw_step()
                 
                 # Check if cards were drawn
                 hand_after = len(current_player.hand)
@@ -609,7 +682,8 @@ class GameEngine:
                     'hand_size': hand_after,
                     'deck_size': deck_after,
                     'first_player_first_turn': (self.game_state.turn_number == 1 and 
-                                              self.game_state.current_player_index == 0)
+                                              self.game_state.current_player_index == 0),
+                    'draw_events': draw_events
                 })
                 
             elif new_phase.value == 'play':
@@ -672,6 +746,10 @@ class GameEngine:
         )
         self.event_manager.trigger_event(ready_context)
         
+        # Don't execute ready step here - let the stepped engine handle it
+        # Mark that ready step needs to be executed
+        self.game_state._needs_ready_step = True
+        
         return ActionResult.success_result(
             action_type=GameAction.PASS_TURN,
             result_type=ActionResultType.TURN_ENDED,
@@ -680,3 +758,57 @@ class GameEngine:
             turn_number=self.game_state.turn_number,
             new_phase=self.game_state.current_phase
         )
+    
+    # =============================================================================
+    # PLAYER CHOICE SYSTEM METHODS
+    # =============================================================================
+    
+    def is_paused_for_choice(self) -> bool:
+        """Check if the game is paused waiting for a player choice."""
+        return self.choice_manager.is_game_paused()
+    
+    def get_current_choice(self) -> Optional[ChoiceContext]:
+        """Get the current choice that needs player input."""
+        return self.choice_manager.get_current_choice()
+    
+    def provide_player_choice(self, choice_id: str, selected_option: str) -> bool:
+        """
+        Provide a player's choice and continue game execution.
+        
+        Args:
+            choice_id: ID of the choice being answered
+            selected_option: ID of the selected option
+            
+        Returns:
+            True if choice was valid and executed, False otherwise
+        """
+        return self.choice_manager.provide_choice(choice_id, selected_option)
+    
+    def auto_resolve_choices(self) -> int:
+        """
+        Auto-resolve all pending choices with their default options.
+        Useful for automated play or testing.
+        
+        Returns:
+            Number of choices that were auto-resolved
+        """
+        return self.choice_manager.auto_resolve_with_defaults()
+    
+    def clear_all_choices(self) -> None:
+        """Clear all pending choices and resume the game. Use with caution."""
+        self.choice_manager.clear_all_choices()
+    
+    def get_choice_summary(self) -> Dict[str, Any]:
+        """Get a summary of the current choice state for debugging/UI."""
+        current_choice = self.get_current_choice()
+        return {
+            'is_paused': self.is_paused_for_choice(),
+            'pending_choices': len(self.choice_manager.pending_choices),
+            'current_choice': {
+                'id': current_choice.choice_id if current_choice else None,
+                'player': current_choice.player.name if current_choice and current_choice.player else None,
+                'ability': current_choice.ability_name if current_choice else None,
+                'prompt': current_choice.prompt if current_choice else None,
+                'options': [opt.id for opt in current_choice.options] if current_choice else []
+            } if current_choice else None
+        }

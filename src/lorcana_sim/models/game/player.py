@@ -110,6 +110,8 @@ class Player:
             return False
         
         self.hand.remove(character)
+        # Set the controller when the character is played
+        character.controller = self
         self.characters_in_play.append(character)
         self.spend_ink(ink_cost)
         return True
@@ -201,6 +203,23 @@ class Player:
         """Perform start-of-turn actions."""
         self.ready_all_characters()
         self.reset_turn_state()
+    
+    def return_to_hand(self, card: Card) -> bool:
+        """Return a card from play to hand."""
+        # Remove from characters in play
+        if hasattr(card, 'strength') and card in self.characters_in_play:
+            self.characters_in_play.remove(card)
+            self.hand.append(card)
+            return True
+        
+        # Remove from items in play
+        if card in self.items_in_play:
+            self.items_in_play.remove(card)
+            self.hand.append(card)
+            return True
+        
+        # Card wasn't in play
+        return False
     
     def get_game_summary(self) -> Dict[str, any]:
         """Get a summary of the player's current state."""

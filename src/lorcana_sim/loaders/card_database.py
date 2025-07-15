@@ -153,8 +153,8 @@ class CardDatabase:
                 subtypes=card_data.subtypes or []
             )
             
-            # Add keyword abilities if they exist
-            card.composable_abilities = self._create_keyword_abilities(card, card_data.abilities)
+            # Add composable abilities (both keyword and named)
+            card.composable_abilities = self._create_composable_abilities(card, card_data.abilities)
             return card
             
         elif card_data.type.lower() == 'action':
@@ -204,14 +204,15 @@ class CardDatabase:
                 abilities=[]
             )
     
-    def _create_keyword_abilities(self, character, abilities_data: List[dict]) -> List:
-        """Create keyword abilities for a character based on ability data."""
+    def _create_composable_abilities(self, character, abilities_data: List[dict]) -> List:
+        """Create composable abilities (keyword and named) for a character based on ability data."""
         from ..models.abilities.composable.keyword_abilities import (
             create_rush_ability, create_singer_ability, create_resist_ability,
             create_support_ability, create_evasive_ability, create_bodyguard_ability,
             create_challenger_ability, create_ward_ability, create_reckless_ability,
             create_vanish_ability, create_shift_ability, create_sing_together_ability
         )
+        from ..models.abilities.composable.named_abilities import NamedAbilityRegistry
         import re
         
         keyword_abilities = []
@@ -271,6 +272,19 @@ class CardDatabase:
                     
                 elif keyword == 'support':
                     keyword_abilities.append(create_support_ability(character))
+            
+            # Handle named abilities
+            elif ability.get('name'):
+                ability_name = ability.get('name')
+                try:
+                    named_ability = NamedAbilityRegistry.create_ability(ability_name, character, ability)
+                    if named_ability:
+                        keyword_abilities.append(named_ability)
+                        print(f"Added named ability {ability_name} to {character.name}")
+                    else:
+                        print(f"Named ability {ability_name} not implemented yet for {character.name}")
+                except Exception as e:
+                    print(f"Warning: Failed to create named ability {ability_name} for {character.name}: {e}")
             
             # Only process abilities with proper keyword field to avoid false positives
             # Effect text can contain phrases like "grants Evasive" which doesn't mean the card has Evasive

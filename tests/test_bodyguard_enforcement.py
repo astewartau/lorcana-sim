@@ -1,4 +1,4 @@
-"""Test for Bodyguard challenge targeting enforcement - should FAIL until implemented."""
+"""Test for Bodyguard challenge targeting enforcement."""
 
 import pytest
 
@@ -47,17 +47,10 @@ def create_bodyguard_character(name: str, **kwargs) -> CharacterCard:
 
 
 class TestBodyguardEnforcement:
-    """Test that Bodyguard actually enforces challenge targeting restrictions.
-    
-    These tests should FAIL until the challenge targeting logic is implemented
-    in the move validator.
-    """
+    """Test that Bodyguard actually enforces challenge targeting restrictions."""
     
     def test_bodyguard_forces_targeting_when_available(self):
-        """Test that when a Bodyguard character is available, opponents must target it.
-        
-        This test should FAIL because the move validator doesn't enforce Bodyguard rules.
-        """
+        """Test that when a Bodyguard character is available, opponents must target it."""
         # Set up players
         player1 = Player("Player 1")
         player2 = Player("Player 2")
@@ -96,15 +89,11 @@ class TestBodyguardEnforcement:
         valid_targets = validator._get_valid_challenge_targets(attacker, all_defenders)
         
         # CRITICAL TEST: When a ready Bodyguard is available, it should be the ONLY valid target
-        # This test should FAIL because the current implementation doesn't enforce Bodyguard rules
         assert len(valid_targets) == 1, f"Expected only 1 target (Bodyguard), but got {len(valid_targets)}: {[t.name for t in valid_targets]}"
         assert valid_targets[0] == bodyguard_char, f"Expected Bodyguard to be forced target, but got {valid_targets[0].name}"
     
     def test_bodyguard_allows_other_targets_when_exerted(self):
-        """Test that when Bodyguard is exerted, other characters can be targeted.
-        
-        This test might pass because it doesn't require special Bodyguard logic.
-        """
+        """Test that when Bodyguard is exerted, other characters can be targeted."""
         # Set up players
         player1 = Player("Player 1")
         player2 = Player("Player 2")
@@ -146,10 +135,7 @@ class TestBodyguardEnforcement:
         assert bodyguard_char not in valid_targets, "Ready Bodyguard should not be targetable"
     
     def test_bodyguard_allows_other_targets_when_damaged_beyond_challenge(self):
-        """Test that when Bodyguard can't be challenged (damaged), others can be targeted.
-        
-        This test might pass because it doesn't require special Bodyguard logic.
-        """
+        """Test that when Bodyguard can't be challenged (damaged), others can be targeted."""
         # Set up players
         player1 = Player("Player 1")
         player2 = Player("Player 2")
@@ -201,7 +187,6 @@ class TestBodyguardEnforcement:
         - 2 normal characters are exerted (should NOT be targetable due to Bodyguard)
         - 1 normal character is ready (not targetable anyway)
         
-        This test should FAIL because Bodyguard enforcement isn't implemented.
         """
         # Set up players
         player1 = Player("Player 1")
@@ -245,7 +230,6 @@ class TestBodyguardEnforcement:
         valid_targets = validator._get_valid_challenge_targets(attacker, all_defenders)
         
         # CRITICAL TEST: Only the exerted Bodyguard should be targetable
-        # This test should FAIL because current implementation doesn't enforce Bodyguard rules
         assert len(valid_targets) == 1, f"Expected only 1 target (exerted Bodyguard), but got {len(valid_targets)}: {[t.name for t in valid_targets]}"
         assert bodyguard1 in valid_targets, "Exerted Bodyguard 1 should be the only valid target"
         assert bodyguard2 not in valid_targets, "Ready Bodyguard 2 should not be targetable"
@@ -254,13 +238,7 @@ class TestBodyguardEnforcement:
         assert normal3 not in valid_targets, "Ready Normal 3 should not be targetable anyway"
     
     def test_basic_challenge_targeting_requires_exerted_defenders(self):
-        """Test that only exerted characters can be challenged (basic rule).
-        
-        This test highlights an additional issue: the move validator doesn't
-        properly filter by exerted state, which is a basic challenge requirement.
-        
-        This test should FAIL because basic exerted state filtering is missing.
-        """
+        """Test that only exerted characters can be challenged (basic rule)."""
         # Set up players
         player1 = Player("Player 1")
         player2 = Player("Player 2")
@@ -301,7 +279,6 @@ class TestBodyguardEnforcement:
         valid_targets = validator._get_valid_challenge_targets(attacker, all_defenders)
         
         # CRITICAL TEST: Only exerted characters should be valid targets
-        # This test will FAIL because _get_valid_challenge_targets doesn't check exerted state
         assert len(valid_targets) == 2, f"Expected 2 targets (only exerted defenders), but got {len(valid_targets)}: {[t.name for t in valid_targets]}"
         
         # Check that only exerted defenders are in valid targets

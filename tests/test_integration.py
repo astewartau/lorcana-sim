@@ -20,8 +20,6 @@ from lorcana_sim.loaders.dreamborn_parser import DreambornParser
 def card_database():
     """Load the real card database."""
     data_path = Path("data/all-cards/allCards.json")
-    if not data_path.exists():
-        pytest.skip("Card database not found")
     
     parser = LorcanaJsonParser(str(data_path))
     return parser.cards
@@ -58,9 +56,10 @@ def test_load_real_card_database(card_database):
             
         except Exception as e:
             errors += 1
-            print(f"Error creating card {card_data.get('fullName', 'Unknown')}: {e}")
+            assert False, f"Failed to create card {card_data.get('fullName', 'Unknown')}: {e}"
     
-    print(f"Successfully created {cards_created} cards with {errors} errors")
+    assert cards_created > 0, "Should have successfully created some cards"
+    assert errors < cards_created, "Should have more successes than failures"
     assert cards_created > 0
     assert errors < cards_created  # Should have more successes than failures
 
@@ -87,9 +86,9 @@ def test_card_type_distribution(card_database):
                     assert isinstance(card, LocationCard)
                     
             except Exception as e:
-                print(f"Error with {card_data.get('fullName', 'Unknown')}: {e}")
+                assert False, f"Error processing card {card_data.get('fullName', 'Unknown')}: {e}"
     
-    print(f"Card type distribution: {type_counts}")
+    assert sum(type_counts.values()) > 0, "Should have processed some cards"
     assert sum(type_counts.values()) > 0
 
 
@@ -113,19 +112,15 @@ def test_character_cards_have_combat_stats(card_database):
             assert card.is_alive is True  # No initial damage
             
         except Exception as e:
-            print(f"Error with character {card_data.get('fullName', 'Unknown')}: {e}")
+                assert False, f"Error with character {card_data.get('fullName', 'Unknown')}: {e}"
 
 
 def test_dreamborn_deck_loading():
     """Test loading a Dreamborn deck."""
     deck_path = Path("data/decks/amethyst-steel.json")
-    if not deck_path.exists():
-        pytest.skip("Dreamborn deck file not found")
     
     # Load card database
     card_db_path = Path("data/all-cards/allCards.json")
-    if not card_db_path.exists():
-        pytest.skip("Card database not found")
     
     parser = LorcanaJsonParser(str(card_db_path))
     card_database = parser.cards
@@ -140,19 +135,18 @@ def test_dreamborn_deck_loading():
         
         # Deck should be close to legal (60 cards)
         legal, errors = deck.is_legal()
-        print(f"Deck legality: {legal}, errors: {errors}")
-        
-        # Test deck properties
-        print(f"Deck summary: {deck.get_summary()}")
+        # Verify deck properties
+        assert deck.total_cards > 0, "Deck should have cards"
+        summary = deck.get_summary()
+        assert summary is not None, "Deck should have a summary"
         
     except Exception as e:
-        pytest.skip(f"Could not load Dreamborn deck: {e}")
+        raise Exception(f"Could not load Dreamborn deck: {e}") from e
 
 
 def test_create_simple_game(sample_cards):
     """Test creating a simple game with real cards."""
-    if len(sample_cards) < 4:
-        pytest.skip("Not enough sample cards")
+    assert len(sample_cards) >= 4, "Not enough sample cards"
     
     # Create two simple decks (not legal, just for testing)
     deck1_cards = sample_cards[:2]
@@ -292,8 +286,7 @@ def test_deck_validation_with_real_cards(card_database):
     """Test deck validation with real cards."""
     deck = _create_random_legal_deck(card_database, "Test Legal Deck")
     
-    if deck is None:
-        pytest.skip("Not enough valid cards in database for deck validation test")
+    assert deck is not None, "Not enough valid cards in database for deck validation test"
     
     legal, errors = deck.is_legal()
     
@@ -358,7 +351,8 @@ def test_create_multiple_deck_archetypes(card_database):
                     # Primary color should be significant portion
                     assert color_dist[primary_color] > deck.total_cards * 0.3
             
-            print(f"  ✅ Created {name}: {deck.total_cards} cards, {deck.unique_cards} unique")
+            assert deck.total_cards > 0, f"{name} should have cards"
+            assert deck.unique_cards > 0, f"{name} should have unique cards"
     
     # Should be able to create at least a few decks
     assert successful_decks >= 3, f"Only created {successful_decks} successful decks"
@@ -377,8 +371,7 @@ def test_deck_building_edge_cases(card_database):
         except Exception:
             continue
     
-    if len(valid_cards) < 5:
-        pytest.skip("Not enough valid cards for edge case testing")
+    assert len(valid_cards) >= 5, "Not enough valid cards for edge case testing"
     
     # Test 1: Deck with too few cards
     deck1 = Deck("Undersized Deck")
