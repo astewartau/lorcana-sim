@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from ..game.game_state import GameState
     from ...engine.event_system import GameEventManager
     from ..abilities.composable import ComposableAbility
+    from ..abilities.composable.conditional_effects import ConditionalEffect
     from ..game.player import Player
 
 
@@ -34,6 +35,7 @@ class CharacterCard(Card):
     
     # Composable Ability Integration
     composable_abilities: List['ComposableAbility'] = field(default_factory=list)
+    conditional_effects: List['ConditionalEffect'] = field(default_factory=list)
     controller: Optional['Player'] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     
@@ -242,12 +244,66 @@ class CharacterCard(Card):
         if 'ward' in kwargs:
             self.metadata['has_ward'] = kwargs['ward']
     
-    def clear_temporary_bonuses(self) -> None:
-        """Clear all 'this_turn' bonuses at end of turn."""
-        self.lore_bonuses = [(amount, duration) for amount, duration in self.lore_bonuses if duration != "this_turn"]
-        self.strength_bonuses = [(amount, duration) for amount, duration in self.strength_bonuses if duration != "this_turn"]
-        self.willpower_bonuses = [(amount, duration) for amount, duration in self.willpower_bonuses if duration != "this_turn"]
-        self.challenger_bonuses = [(amount, duration) for amount, duration in self.challenger_bonuses if duration != "this_turn"]
+    def clear_temporary_bonuses(self, game_state=None) -> List[Dict]:
+        """Clear all 'this_turn' bonuses at end of turn and return list of expired effects."""
+        expired_effects = []
+        
+        # Track what we're removing for messaging - aggregate same bonus types
+        challenger_total = 0
+        for amount, duration in self.challenger_bonuses:
+            if duration in ["this_turn", "turn"]:
+                challenger_total += amount
+        
+        if challenger_total > 0:
+            expired_effects.append({
+                'type': 'EFFECT_EXPIRED',
+                'target': self.name,
+                'effect_type': 'challenger_bonus',
+                'effect_value': challenger_total,
+                'reason': 'end of turn',
+                'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0) if game_state else 0
+            })
+        
+        for amount, duration in self.strength_bonuses:
+            if duration in ["this_turn", "turn"]:
+                expired_effects.append({
+                    'type': 'EFFECT_EXPIRED',
+                    'target': self.name,
+                    'effect_type': 'strength_bonus',
+                    'effect_value': amount,
+                    'reason': 'end of turn',
+                    'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0) if game_state else 0
+                })
+        
+        for amount, duration in self.willpower_bonuses:
+            if duration in ["this_turn", "turn"]:
+                expired_effects.append({
+                    'type': 'EFFECT_EXPIRED',
+                    'target': self.name,
+                    'effect_type': 'willpower_bonus',
+                    'effect_value': amount,
+                    'reason': 'end of turn',
+                    'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0) if game_state else 0
+                })
+                
+        for amount, duration in self.lore_bonuses:
+            if duration in ["this_turn", "turn"]:
+                expired_effects.append({
+                    'type': 'EFFECT_EXPIRED',
+                    'target': self.name,
+                    'effect_type': 'lore_bonus',
+                    'effect_value': amount,
+                    'reason': 'end of turn',
+                    'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0) if game_state else 0
+                })
+        
+        # Actually remove the temporary bonuses
+        self.lore_bonuses = [(amount, duration) for amount, duration in self.lore_bonuses if duration not in ["this_turn", "turn"]]
+        self.strength_bonuses = [(amount, duration) for amount, duration in self.strength_bonuses if duration not in ["this_turn", "turn"]]
+        self.willpower_bonuses = [(amount, duration) for amount, duration in self.willpower_bonuses if duration not in ["this_turn", "turn"]]
+        self.challenger_bonuses = [(amount, duration) for amount, duration in self.challenger_bonuses if duration not in ["this_turn", "turn"]]
+        
+        return expired_effects
     
     # Composable Ability Integration Methods
     def register_composable_abilities(self, event_manager: 'GameEventManager') -> None:
@@ -263,3 +319,26 @@ class CharacterCard(Card):
     def add_composable_ability(self, ability: 'ComposableAbility') -> None:
         """Add a composable ability to this character."""
         self.composable_abilities.append(ability)
+    
+    # Conditional Effect Management Methods
+    def add_conditional_effect(self, effect: 'ConditionalEffect') -> None:
+        """Add a conditional effect to this character."""
+        self.conditional_effects.append(effect)
+    
+    def remove_conditional_effect(self, effect_id: str) -> Optional['ConditionalEffect']:
+        """Remove a conditional effect by ID and return it if found."""
+        for i, effect in enumerate(self.conditional_effects):
+            if effect.effect_id == effect_id:
+                return self.conditional_effects.pop(i)
+        return None
+    
+    def get_conditional_effect(self, effect_id: str) -> Optional['ConditionalEffect']:
+        """Get a conditional effect by ID."""
+        for effect in self.conditional_effects:
+            if effect.effect_id == effect_id:
+                return effect
+        return None
+    
+    def get_active_conditional_effects(self) -> List['ConditionalEffect']:
+        """Get all currently active conditional effects."""
+        return [effect for effect in self.conditional_effects if effect.is_active]

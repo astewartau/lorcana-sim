@@ -72,6 +72,15 @@ class GameEngine:
                 deck_size_after=len(player.deck)
             )
             
+            # Handle zone transition: card moved from deck to hand
+            zone_events = self.game_state.notify_card_zone_change(card, 'deck', 'hand')
+            
+            # Store zone events for later processing if any
+            if zone_events and not hasattr(self, '_pending_zone_events'):
+                self._pending_zone_events = []
+            if zone_events:
+                self._pending_zone_events.extend(zone_events)
+            
             # Trigger CARD_DRAWN event
             draw_context = EventContext(
                 event_type=GameEvent.CARD_DRAWN,
@@ -182,23 +191,42 @@ class GameEngine:
     
     def _execute_play_character(self, character: CharacterCard) -> ActionResult:
         """Execute playing a character card."""
+        print(f"DEBUG: _execute_play_character called for {character.name}")
         current_player = self.game_state.current_player
         
         if current_player.play_character(character, character.cost):
+            print(f"DEBUG: Successfully played character {character.name}")
             self.game_state.actions_this_turn.append(GameAction.PLAY_CHARACTER)
             
+            print(f"DEBUG: Setting turn_played for {character.name}")
             # Set turn_played for ink drying system
             character.turn_played = self.game_state.turn_number
             character.is_dry = False  # Character has wet ink when just played
             
-            # Register any triggered abilities this character has
-            for ability in character.abilities:
-                if hasattr(ability, 'get_trigger_events') and ability.get_trigger_events():
-                    self.event_manager.register_triggered_ability(ability)
+            # Note: Triggered abilities are now part of composable_abilities
+            # They will be registered below with the composable abilities
             
             # Register composable abilities this character has
-            for ability in character.composable_abilities:
-                self.event_manager.register_composable_ability(ability)
+            try:
+                print(f"DEBUG: About to register composable abilities for {character.name}")
+                print(f"DEBUG: Character {character.name} has {len(character.composable_abilities)} composable abilities")
+                for ability in character.composable_abilities:
+                    print(f"DEBUG: Registering ability {ability.name}")
+                    self.event_manager.register_composable_ability(ability)
+            except Exception as e:
+                print(f"DEBUG: Exception during ability registration: {e}")
+                import traceback
+                traceback.print_exc()
+            
+            # Notify zone transition: card moved from hand to play
+            # This will handle conditional effect registration/deregistration based on activation zones
+            zone_events = self.game_state.notify_card_zone_change(character, 'hand', 'play')
+            
+            # Store zone events for message processing later
+            if zone_events and not hasattr(self, '_pending_zone_events'):
+                self._pending_zone_events = []
+            if zone_events:
+                self._pending_zone_events.extend(zone_events)
             
             # Trigger CHARACTER_ENTERS_PLAY event (more general)
             enters_context = EventContext(
@@ -220,14 +248,24 @@ class GameEngine:
             if played_results:
                 trigger_results.extend(played_results)
             
+            # Include zone events in the result
+            result_data = {
+                'character': character,
+                'player': current_player,
+                'ink_after': current_player.available_ink,
+                'total_ink': current_player.total_ink,
+                'triggered_abilities': trigger_results or []
+            }
+            
+            # Add zone events if any occurred
+            if hasattr(self, '_pending_zone_events') and self._pending_zone_events:
+                result_data['zone_events'] = self._pending_zone_events.copy()
+                self._pending_zone_events.clear()
+            
             return ActionResult.success_result(
                 action_type=GameAction.PLAY_CHARACTER,
                 result_type=ActionResultType.CHARACTER_PLAYED,
-                character=character,
-                player=current_player,
-                ink_after=current_player.available_ink,
-                total_ink=current_player.total_ink,
-                triggered_abilities=trigger_results or []
+                **result_data
             )
         
         return ActionResult.failure_result(GameAction.PLAY_CHARACTER, "Failed to play character")
@@ -669,12 +707,24 @@ class GameEngine:
                     game_state=self.game_state
                 )
                 self.event_manager.trigger_event(draw_context)
-                draw_events = self.game_state.draw_step()
+                
+                # Use the event-aware draw method instead of direct draw_step
+                self._execute_draw_step()
                 
                 # Check if cards were drawn
                 hand_after = len(current_player.hand)
                 deck_after = len(current_player.deck)
                 cards_drawn = hand_after - hand_before
+                
+                # Get draw events from the game state
+                draw_events = []
+                if cards_drawn > 0:
+                    # Find the most recent card drawn event
+                    last_event = self.game_state.get_last_event()
+                    if last_event and last_event.get('type') == 'CARD_DRAWN':
+                        cards_drawn_names = [card.name for card in last_event.get('cards_drawn', [])]
+                        if cards_drawn_names:
+                            draw_events = [f"{current_player.name} drew {card_name}" for card_name in cards_drawn_names]
                 
                 result_data.update({
                     'card_drawn': cards_drawn > 0,
@@ -685,6 +735,11 @@ class GameEngine:
                                               self.game_state.current_player_index == 0),
                     'draw_events': draw_events
                 })
+                
+                # Include zone events from drawing if any occurred
+                if hasattr(self, '_pending_zone_events') and self._pending_zone_events:
+                    result_data['zone_events'] = self._pending_zone_events.copy()
+                    self._pending_zone_events.clear()
                 
             elif new_phase.value == 'play':
                 play_context = EventContext(
@@ -728,6 +783,15 @@ class GameEngine:
         old_player_index = self.game_state.current_player_index
         self.game_state.end_turn()
         
+        # Evaluate conditional effects now that turn has actually changed
+        turn_change_events = self.game_state.evaluate_conditional_effects()
+        
+        # Store turn change events for stepped engine processing
+        if turn_change_events and not hasattr(self, '_pending_zone_events'):
+            self._pending_zone_events = []
+        if turn_change_events:
+            self._pending_zone_events.extend(turn_change_events)
+        
         # Trigger TURN_BEGINS for new player
         new_player = self.game_state.current_player
         turn_begin_context = EventContext(
@@ -750,13 +814,23 @@ class GameEngine:
         # Mark that ready step needs to be executed
         self.game_state._needs_ready_step = True
         
+        # Include turn change events in the result
+        result_data = {
+            'old_player': current_player,
+            'new_player': new_player,
+            'turn_number': self.game_state.turn_number,
+            'new_phase': self.game_state.current_phase
+        }
+        
+        # Add turn change events if any occurred
+        if hasattr(self, '_pending_zone_events') and self._pending_zone_events:
+            result_data['zone_events'] = self._pending_zone_events.copy()
+            self._pending_zone_events.clear()
+        
         return ActionResult.success_result(
             action_type=GameAction.PASS_TURN,
             result_type=ActionResultType.TURN_ENDED,
-            old_player=current_player,
-            new_player=new_player,
-            turn_number=self.game_state.turn_number,
-            new_phase=self.game_state.current_phase
+            **result_data
         )
     
     # =============================================================================

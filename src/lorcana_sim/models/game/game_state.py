@@ -61,7 +61,7 @@ class GameState:
     # Game over state
     game_result: GameResult = GameResult.ONGOING
     winner: Optional[Player] = None
-    game_over_reason: str = ""
+    game_over_data: Dict[str, Any] = field(default_factory=dict)
     
     # Stalemate detection
     consecutive_passes: int = 0  # Track consecutive pass actions
@@ -69,6 +69,12 @@ class GameState:
     
     # Last event tracking for inspection
     last_event: Optional[Dict[str, Any]] = None  # The most recent event that occurred
+    
+    # Zone management for conditional effects
+    _zone_manager: Optional[Any] = None  # ZoneManager instance (lazy loaded)
+    
+    # Cost modification management
+    _cost_modification_manager: Optional[Any] = None  # CostModificationManager instance (lazy loaded)
     
     def __post_init__(self) -> None:
         """Validate game state after creation."""
@@ -90,6 +96,8 @@ class GameState:
     
     def check_game_state(self) -> None:
         """Check and update game state for win/loss/draw conditions."""
+        from ...engine.event_system import GameEvent
+        
         if self.game_result != GameResult.ONGOING:
             return  # Game already over
         
@@ -98,7 +106,14 @@ class GameState:
             if player.lore >= 20:
                 self.game_result = GameResult.LORE_VICTORY
                 self.winner = player
-                self.game_over_reason = f"{player.name} wins with {player.lore} lore!"
+                self.game_over_data = {
+                    'event': GameEvent.GAME_ENDS,
+                    'context': {
+                        'result': 'lore_victory',
+                        'winner_name': player.name,
+                        'lore': player.lore
+                    }
+                }
                 return
         
         # Check deck exhaustion (only after game has actually started)
@@ -110,14 +125,27 @@ class GameState:
                     opponent = self.get_opponent(player)
                     self.game_result = GameResult.DECK_EXHAUSTION
                     self.winner = opponent
-                    self.game_over_reason = f"{opponent.name} wins - {player.name} ran out of cards!"
+                    self.game_over_data = {
+                        'event': GameEvent.GAME_ENDS,
+                        'context': {
+                            'result': 'deck_exhaustion',
+                            'winner_name': opponent.name,
+                            'loser_name': player.name
+                        }
+                    }
                     return
         
         # Check for stalemate (too many consecutive passes)
         if self.consecutive_passes >= self.max_consecutive_passes:
             self.game_result = GameResult.STALEMATE
             self.winner = None
-            self.game_over_reason = "Game ended in stalemate - both players unable to make progress"
+            self.game_over_data = {
+                'event': GameEvent.GAME_ENDS,
+                'context': {
+                    'result': 'stalemate',
+                    'consecutive_passes': self.consecutive_passes
+                }
+            }
             return
     
     def is_game_over(self) -> bool:
@@ -125,10 +153,10 @@ class GameState:
         self.check_game_state()
         return self.game_result != GameResult.ONGOING
     
-    def get_game_result(self) -> Tuple[GameResult, Optional[Player], str]:
+    def get_game_result(self) -> Tuple[GameResult, Optional[Player], Dict[str, Any]]:
         """Get the current game result."""
         self.check_game_state()
-        return self.game_result, self.winner, self.game_over_reason
+        return self.game_result, self.winner, self.game_over_data
     
     def get_opponent(self, player: Player) -> Player:
         """Get the opponent of the given player (assumes 2-player game)."""
@@ -169,12 +197,14 @@ class GameState:
         # Start ready phase for new player (but don't execute ready_step yet)
         self.current_phase = Phase.READY
     
-    def ready_step(self) -> List[str]:
+    def ready_step(self) -> List[Dict[str, Any]]:
         """Execute the ready step (ready all cards and start turn).
         
         Returns:
-            List of descriptions of items that were readied.
+            List of event data for items that were readied.
         """
+        from ...engine.event_system import GameEvent
+        
         current_player = self.current_player
         readied_items = []
         
@@ -189,7 +219,13 @@ class GameState:
                 char.is_dry = self.turn_number > char.turn_played
                 # Track characters that just dried
                 if not old_dry_status and char.is_dry and not char.exerted:
-                    readied_items.append(f"{char.name} ink dried")
+                    readied_items.append({
+                        'event': GameEvent.CHARACTER_READIED,
+                        'context': {
+                            'character_name': char.name,
+                            'reason': 'ink_dried'
+                        }
+                    })
             else:
                 # Character wasn't played this game (already dry)
                 char.is_dry = True
@@ -199,14 +235,27 @@ class GameState:
         
         # Track which characters were readied from exerted state
         for char in exerted_characters:
-            readied_items.append(f"{char.name} readied")
+            readied_items.append({
+                'event': GameEvent.CHARACTER_READIED,
+                'context': {
+                    'character_name': char.name,
+                    'reason': 'ready_step'
+                }
+            })
         
         # Ready all items
         exerted_items = [item for item in current_player.items_in_play 
                         if hasattr(item, 'exerted') and item.exerted]
         for item in exerted_items:
             item.exerted = False
-            readied_items.append(f"{item.name} (item) readied")
+            readied_items.append({
+                'event': GameEvent.CHARACTER_READIED,  # Using CHARACTER_READIED for items too
+                'context': {
+                    'item_name': item.name,
+                    'item_type': 'item',
+                    'reason': 'ready_step'
+                }
+            })
         
         return readied_items
     
@@ -234,12 +283,14 @@ class GameState:
         # TODO: Implement start-of-turn ability resolution here
         pass
     
-    def draw_step(self) -> List[str]:
+    def draw_step(self) -> List[Dict[str, Any]]:
         """Execute the draw step (draw a card).
         
         Returns:
-            List of descriptions of draw events that occurred.
+            List of event data for draw events that occurred.
         """
+        from ...engine.event_system import GameEvent
+        
         current_player = self.current_player
         draw_events = []
         
@@ -251,14 +302,101 @@ class GameState:
         if should_draw:
             drawn_card = current_player.draw_card()
             if drawn_card:
-                draw_events.append(f"{current_player.name} drew {drawn_card.name}")
+                draw_events.append({
+                    'event': GameEvent.CARD_DRAWN,
+                    'context': {
+                        'player_name': current_player.name,
+                        'card_name': drawn_card.name
+                    }
+                })
             else:
-                draw_events.append(f"{current_player.name} attempted to draw but deck is empty")
+                draw_events.append({
+                    'event': GameEvent.CARD_DRAWN,
+                    'context': {
+                        'player_name': current_player.name,
+                        'draw_failed': True,
+                        'reason': 'empty_deck'
+                    }
+                })
         elif self.turn_number == 1 and self.current_player_index == 0:
             self.first_turn_draw_skipped = True
-            draw_events.append(f"{current_player.name} skipped first turn draw")
+            draw_events.append({
+                'event': GameEvent.DRAW_STEP,
+                'context': {
+                    'player_name': current_player.name,
+                    'action': 'skipped',
+                    'reason': 'first_turn'
+                }
+            })
         
         return draw_events
+    
+    # Zone Management Methods
+    @property
+    def zone_manager(self):
+        """Get or create the zone manager instance."""
+        if self._zone_manager is None:
+            from ..abilities.composable.zone_manager import ZoneManager
+            self._zone_manager = ZoneManager()
+        return self._zone_manager
+    
+    def register_card_conditional_effects(self, card) -> None:
+        """Register all conditional effects from a card with the zone manager."""
+        if hasattr(card, 'conditional_effects'):
+            for effect in card.conditional_effects:
+                self.zone_manager.register_conditional_effect(effect)
+    
+    def unregister_card_conditional_effects(self, card) -> None:
+        """Unregister all conditional effects from a card."""
+        if hasattr(card, 'conditional_effects'):
+            for effect in card.conditional_effects:
+                self.zone_manager.unregister_conditional_effect(effect)
+    
+    def notify_card_zone_change(self, card, from_zone_name: Optional[str], to_zone_name: Optional[str]) -> List[Dict]:
+        """Notify zone manager of card movement and return any events generated."""
+        if not hasattr(card, 'conditional_effects') or not card.conditional_effects:
+            return []
+        
+        # Convert zone names to ActivationZone enums
+        from ..abilities.composable.conditional_effects import ActivationZone
+        
+        zone_map = {
+            'hand': ActivationZone.HAND,
+            'play': ActivationZone.PLAY,
+            'discard': ActivationZone.DISCARD,
+            'deck': ActivationZone.DECK,
+            'ink_well': ActivationZone.INK_WELL
+        }
+        
+        from_zone = zone_map.get(from_zone_name) if from_zone_name else None
+        to_zone = zone_map.get(to_zone_name) if to_zone_name else None
+        
+        return self.zone_manager.handle_zone_transition(card, from_zone, to_zone, self)
+    
+    def evaluate_conditional_effects(self) -> List[Dict]:
+        """Evaluate all conditional effects and return any events generated."""
+        return self.zone_manager.evaluate_all_effects(self)
+    
+    # Cost Modification Methods
+    @property
+    def cost_modification_manager(self):
+        """Get or create the cost modification manager instance."""
+        if self._cost_modification_manager is None:
+            from ..abilities.composable.cost_modification import CostModificationManager
+            self._cost_modification_manager = CostModificationManager()
+        return self._cost_modification_manager
+    
+    def get_modified_card_cost(self, card) -> int:
+        """Get the modified cost for a card after all applicable cost modifiers."""
+        return self.cost_modification_manager.get_modified_cost(card, self)
+    
+    def register_cost_modifier(self, modifier) -> None:
+        """Register a cost modifier with the game state."""
+        self.cost_modification_manager.register_cost_modifier(modifier)
+    
+    def unregister_cost_modifier(self, modifier) -> None:
+        """Unregister a cost modifier from the game state."""
+        self.cost_modification_manager.unregister_cost_modifier(modifier)
     
     def can_play_ink(self) -> bool:
         """Check if current player can play ink."""

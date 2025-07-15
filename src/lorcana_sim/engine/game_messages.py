@@ -52,6 +52,8 @@ class StepExecutedMessage(GameMessage):
     step_id: str = ""
     description: str = ""
     result: str = ""
+    deferred_action: Optional[Any] = None  # Store action to apply when message is fetched
+    event_data: Optional[Dict[str, Any]] = None  # Raw event data with GameEvent enum and context
 
 
 @dataclass

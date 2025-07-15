@@ -14,6 +14,22 @@ class Effect(ABC):
         """Apply this effect to a target."""
         pass
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """
+        Get the events that this effect will emit after execution.
+        
+        Args:
+            target: The target the effect was applied to
+            context: The context the effect was applied with
+            result: The result returned by apply()
+            
+        Returns:
+            List of event dictionaries to be emitted
+        """
+        # Default implementation returns empty list
+        # Subclasses should override to declare their events
+        return []
+    
     def __add__(self, other: 'Effect') -> 'CompositeEffect':
         """Combine effects with +"""
         if isinstance(other, CompositeEffect):
@@ -37,12 +53,30 @@ class CompositeEffect(Effect):
     
     def __init__(self, effects: List[Effect]):
         self.effects = effects
+        self._sub_results = []  # Track results from each sub-effect
     
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
         result = target
+        self._sub_results = []
         for effect in self.effects:
             result = effect.apply(result, context)
+            self._sub_results.append((effect, result))
         return result
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Aggregate events from all sub-effects."""
+        all_events = []
+        # Use the stored sub-results if available, otherwise re-calculate
+        if self._sub_results:
+            for effect, sub_result in self._sub_results:
+                events = effect.get_events(target, context, sub_result)
+                all_events.extend(events)
+        else:
+            # Fallback: use final result for all effects
+            for effect in self.effects:
+                events = effect.get_events(target, context, result)
+                all_events.extend(events)
+        return all_events
     
     def __str__(self) -> str:
         return " + ".join(str(effect) for effect in self.effects)
@@ -61,6 +95,14 @@ class RepeatedEffect(Effect):
             result = self.effect.apply(result, context)
         return result
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events from repeated effect."""
+        all_events = []
+        for _ in range(self.count):
+            events = self.effect.get_events(target, context, result)
+            all_events.extend(events)
+        return all_events
+    
     def __str__(self) -> str:
         return f"({self.effect}) * {self.count}"
 
@@ -75,6 +117,11 @@ class ChoiceEffect(Effect):
         # TODO: Integrate with decision system
         # For now, just apply first effect
         return self.effects[0].apply(target, context)
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events from chosen effect."""
+        # For now, return events from first effect
+        return self.effects[0].get_events(target, context, result)
     
     def __str__(self) -> str:
         return " | ".join(str(effect) for effect in self.effects)
@@ -94,6 +141,14 @@ class ConditionalEffect(Effect):
         elif self.else_effect:
             return self.else_effect.apply(target, context)
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events from conditional effect."""
+        if self.condition(target, context):
+            return self.effect.get_events(target, context, result)
+        elif self.else_effect:
+            return self.else_effect.get_events(target, context, result)
+        return []
     
     def __str__(self) -> str:
         else_str = f" else {self.else_effect}" if self.else_effect else ""
@@ -131,6 +186,27 @@ class StatModification(Effect):
             setattr(target, self.stat, current_value + self.amount)
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for stat modification."""
+        if result is None:
+            return []
+        
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.STAT_MODIFIED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'stat_name': self.stat,
+                'stat_change': self.amount,
+                'duration': self.duration,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         sign = "+" if self.amount >= 0 else ""
         return f"{self.stat} {sign}{self.amount} ({self.duration})"
@@ -141,12 +217,14 @@ class DrawCards(Effect):
     
     def __init__(self, count: int):
         self.count = count
+        self._drawn_cards = []
+        self._player = None
     
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
         # If target is already a player/controller, use it directly
         if hasattr(target, 'draw_cards'):
-            drawn_cards = target.draw_cards(self.count)
-            self._set_card_draw_event(target, drawn_cards, context)
+            self._player = target
+            self._drawn_cards = target.draw_cards(self.count)
             return target
         
         # Otherwise get controller from target
@@ -158,38 +236,42 @@ class DrawCards(Effect):
                 controller = source.controller
         
         if controller and hasattr(controller, 'draw_cards'):
-            drawn_cards = controller.draw_cards(self.count)
-            self._set_card_draw_event(controller, drawn_cards, context)
+            self._player = controller
+            self._drawn_cards = controller.draw_cards(self.count)
+        
         return target
     
-    def _set_card_draw_event(self, player: Any, drawn_cards: List[Any], context: Dict[str, Any]) -> None:
-        """Set the last event for card draws from abilities."""
-        game_state = context.get('game_state')
-        if not game_state or not hasattr(game_state, 'set_last_event'):
-            return
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get CARD_DRAWN events for each card drawn."""
+        if not self._player or not self._drawn_cards:
+            return []
         
-        # Only set event if cards were actually drawn
-        actual_cards = [card for card in drawn_cards if card is not None]
+        # Filter out None values
+        actual_cards = [card for card in self._drawn_cards if card is not None]
         if not actual_cards:
-            return
-            
-        # Determine the source of the draw
-        source_character = context.get('source')
-        ability_name = "Unknown Ability"
-        if source_character and hasattr(source_character, 'full_name'):
-            ability_name = source_character.full_name
+            return []
         
-        # Set the last event with structured data
-        game_state.set_last_event(
-            'CARD_DRAWN',
-            player=player.name,
-            cards_drawn=actual_cards,
-            count=len(actual_cards),
-            source='ability',
-            ability_name=ability_name,
-            hand_size_after=len(player.hand),
-            deck_size_after=len(player.deck)
-        )
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        # Create one event per card drawn (for true atomicity)
+        events = []
+        for card in actual_cards:
+            events.append({
+                'type': GameEvent.CARD_DRAWN,
+                'player': self._player,
+                'source': context.get('source') or context.get('ability_owner'),
+                'additional_data': {
+                    'card_drawn': card,
+                    'card_name': card.name if hasattr(card, 'name') else 'Unknown Card',
+                    'source': 'ability',
+                    'ability_name': context.get('ability_name', 'Unknown'),
+                    'hand_size_after': len(self._player.hand),
+                    'deck_size_after': len(self._player.deck)
+                }
+            })
+        
+        return events
     
     def __str__(self) -> str:
         return f"draw {self.count} card{'s' if self.count != 1 else ''}"
@@ -203,6 +285,25 @@ class BanishCharacter(Effect):
             target.banish()
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get CHARACTER_BANISHED event for this effect."""
+        if not hasattr(target, 'controller'):
+            return []
+        
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.CHARACTER_BANISHED,
+            'source': target,
+            'player': target.controller,
+            'additional_data': {
+                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'banishment_cause': 'ability',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return "banish character"
 
@@ -215,6 +316,26 @@ class ReturnToHand(Effect):
             target.controller.return_to_hand(target)
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get CARD_RETURNED_TO_HAND event for this effect."""
+        if not hasattr(target, 'controller'):
+            return []
+        
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.CARD_RETURNED_TO_HAND,
+            'source': target,
+            'player': target.controller,
+            'additional_data': {
+                'card_name': target.name if hasattr(target, 'name') else 'Unknown Card',
+                'from_zone': 'play',  # Assuming from play, could be enhanced
+                'source': 'ability',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return "return to hand"
 
@@ -224,40 +345,54 @@ class DiscardCard(Effect):
     
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
         # Get the controller who owns this card
-        if hasattr(target, 'controller'):
-            controller = target.controller
-        else:
-            # If target doesn't have controller, get from ability owner
-            ability_owner = context.get('ability_owner')
-            controller = ability_owner.controller if ability_owner else None
+        controller = self._get_controller(target, context)
         
         if controller and hasattr(controller, 'hand') and target in controller.hand:
-            # Add discard event to collection for composite effects
-            game_state = context.get('game_state')
-            if game_state:
-                card_name = target.name if hasattr(target, 'name') else 'Unknown Card'
-                discard_event = {
-                    'type': 'CARD_DISCARDED',
-                    'player': controller.name,
-                    'card_discarded': target,
-                    'card_name': card_name,
-                    'source': 'ability',
-                    'ability_name': context.get('ability_name', 'Unknown'),
-                    'hand_size_after': len(controller.hand) - 1,
-                    'discard_size_after': len(controller.discard_pile) + 1,
-                    'timestamp': len(getattr(game_state, 'actions_this_turn', [])) + len(getattr(game_state, 'choice_events', []))
-                }
-                
-                # Add to choice events collection if it exists, otherwise set as last event
-                if hasattr(game_state, 'choice_events'):
-                    game_state.choice_events.append(discard_event)
-                elif hasattr(game_state, 'set_last_event'):
-                    game_state.set_last_event(**{k: v for k, v in discard_event.items() if k != 'timestamp'})
-            
             controller.hand.remove(target)
             controller.discard_pile.append(target)
         
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get the CARD_DISCARDED event for this effect."""
+        controller = self._get_controller(target, context)
+        
+        if not controller:
+            return []
+        
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        card_name = target.name if hasattr(target, 'name') else 'Unknown Card'
+        
+        return [{
+            'type': GameEvent.CARD_DISCARDED,
+            'player': controller,
+            'source': target,
+            'additional_data': {
+                'card_discarded': target,
+                'card_name': card_name,
+                'source': 'ability',
+                'ability_name': context.get('ability_name', 'Unknown'),
+                'hand_size_after': len(controller.hand),
+                'discard_size_after': len(controller.discard_pile)
+            }
+        }]
+    
+    def _get_controller(self, target: Any, context: Dict[str, Any]) -> Any:
+        """Helper to get the controller of a card."""
+        # First try to get controller from target
+        if hasattr(target, 'controller') and target.controller:
+            return target.controller
+        
+        # If target doesn't have controller, get from context
+        # Try ability owner first, then player
+        ability_owner = context.get('ability_owner')
+        if ability_owner and hasattr(ability_owner, 'controller'):
+            return ability_owner.controller
+        
+        # Try getting player directly from context
+        return context.get('player')
     
     def __str__(self) -> str:
         return "discard card"
@@ -270,6 +405,25 @@ class ExertCharacter(Effect):
         if hasattr(target, 'exerted'):
             target.exerted = True
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for exerting character."""
+        if not hasattr(target, 'controller'):
+            return []
+        
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.CHARACTER_EXERTED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller,
+            'additional_data': {
+                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         return "exert character"
@@ -291,6 +445,22 @@ class PreventEffect(Effect):
             event_context.additional_data['prevented'] = True
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for preventing effect."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.EFFECT_PREVENTED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'effect_type': self.effect_type,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return f"prevent {self.effect_type}"
 
@@ -307,6 +477,22 @@ class ModifyDamage(Effect):
             current_damage = event_context.additional_data['damage']
             event_context.additional_data['damage'] = max(0, current_damage - self.reduction)
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for damage modification."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.DAMAGE_MODIFIED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'damage_reduction': self.reduction,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         return f"reduce damage by {self.reduction}"
@@ -334,26 +520,27 @@ class ForceRetarget(Effect):
             event_context.additional_data['retargeted'] = True
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for force retargeting."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        event_context = context.get('event_context')
+        new_target = event_context.target if event_context else None
+        
+        return [{
+            'type': GameEvent.TARGET_CHANGED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'new_target': new_target.name if hasattr(new_target, 'name') else str(new_target),
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return "force retarget"
-
-
-class ModifySongCost(Effect):
-    """Modify song singing cost (for Singer)."""
-    
-    def __init__(self, singer_cost: int):
-        self.singer_cost = singer_cost
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        event_context = context.get('event_context')
-        if event_context and event_context.additional_data:
-            # Mark that this character can sing songs
-            event_context.additional_data['can_sing'] = True
-            event_context.additional_data['singer_cost'] = self.singer_cost
-        return target
-    
-    def __str__(self) -> str:
-        return f"can sing songs (cost {self.singer_cost})"
 
 
 class GrantProperty(Effect):
@@ -371,6 +558,23 @@ class GrantProperty(Effect):
             target.metadata = {self.property_name: self.value}
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for granting property."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.PROPERTY_GRANTED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'property_name': self.property_name,
+                'property_value': self.value,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return f"grant {self.property_name}"
 
@@ -381,8 +585,46 @@ class NoEffect(Effect):
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for no effect."""
+        return []
+    
     def __str__(self) -> str:
         return "no effect"
+
+
+class ModifySongCost(Effect):
+    """Modify song singing cost (for Singer)."""
+    
+    def __init__(self, singer_cost: int):
+        self.singer_cost = singer_cost
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        event_context = context.get('event_context')
+        if event_context and event_context.additional_data:
+            # Mark that this character can sing songs
+            event_context.additional_data['can_sing'] = True
+            event_context.additional_data['singer_cost'] = self.singer_cost
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for song cost modification."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.SINGING_COST_MODIFIED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'singer_cost': self.singer_cost,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
+    def __str__(self) -> str:
+        return f"can sing songs (cost {self.singer_cost})"
 
 
 # =============================================================================
@@ -441,6 +683,22 @@ class ShiftEffect(Effect):
             target.metadata = {'shift_cost_reduction': self.cost_reduction}
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for shift activation."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.SHIFT_ACTIVATED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'cost_reduction': self.cost_reduction,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         if self.cost_reduction > 0:
             return f"shift (reduce cost by {self.cost_reduction})"
@@ -458,6 +716,22 @@ class ChallengerEffect(Effect):
         if hasattr(target, 'add_strength_bonus'):
             target.add_strength_bonus(self.strength_bonus, "this_challenge")
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for challenger activation."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.CHALLENGER_ACTIVATED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'strength_bonus': self.strength_bonus,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         return f"challenger +{self.strength_bonus}"
@@ -479,6 +753,22 @@ class VanishEffect(Effect):
                 target.metadata = {'banished': True}
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for vanish activation."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.CHARACTER_VANISHED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return "vanish (banish when targeted by opponent)"
 
@@ -494,6 +784,22 @@ class RecklessEffect(Effect):
         else:
             target.metadata = {'cannot_quest': True, 'must_challenge_if_able': True}
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for reckless activation."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.RECKLESS_ACTIVATED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         return "reckless (can't quest, must challenge if able)"
@@ -513,28 +819,71 @@ class SingTogetherEffect(Effect):
             event_context.additional_data['can_sing_together'] = True
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for sing together activation."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.SING_TOGETHER_ACTIVATED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'required_cost': self.required_cost,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return f"sing together {self.required_cost}"
 
 
 class CostModification(Effect):
-    """Modify the cost of playing cards or abilities."""
+    """Modify the cost of a target card."""
     
-    def __init__(self, cost_change: int, target_type: str = "all"):
+    def __init__(self, cost_change: int):
         self.cost_change = cost_change  # Negative for cost reduction
-        self.target_type = target_type  # "all", "characters", "actions", "items"
     
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        # This effect typically applies to the player's hand or game state
-        # Implementation would depend on how cost modifications are tracked
-        event_context = context.get('event_context')
-        if event_context and event_context.additional_data:
-            event_context.additional_data[f'cost_modification_{self.target_type}'] = self.cost_change
+        # If target is None, this effect cannot be applied (no valid targets)
+        if target is None:
+            return None
+            
+        # If target has a cost attribute, modify it directly
+        if hasattr(target, 'cost'):
+            target.cost += self.cost_change
+        elif hasattr(target, 'modify_cost'):
+            # Use modify_cost method if available
+            target.modify_cost(self.cost_change)
+        else:
+            # Fallback: store in metadata
+            if not hasattr(target, 'metadata'):
+                target.metadata = {}
+            target.metadata['cost_modification'] = target.metadata.get('cost_modification', 0) + self.cost_change
+        
         return target
+
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for cost modification."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.COST_MODIFIED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'cost_change': self.cost_change,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         sign = "+" if self.cost_change >= 0 else ""
-        return f"modify {self.target_type} cost by {sign}{self.cost_change}"
+        return f"modify cost by {sign}{self.cost_change}"
 
 
 class ReadyCharacter(Effect):
@@ -544,6 +893,25 @@ class ReadyCharacter(Effect):
         if hasattr(target, 'exerted'):
             target.exerted = False
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for readying character."""
+        if not hasattr(target, 'controller'):
+            return []
+        
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.CHARACTER_READIED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller,
+            'additional_data': {
+                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         return "ready character"
@@ -566,6 +934,22 @@ class PlayCardFromDiscard(Effect):
                 player.temporary_effects = []
             player.temporary_effects.append(('play_from_discard', self.card_filter))
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for playing card from discard."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.PLAYED_FROM_DISCARD,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': context.get('player') or getattr(target, 'controller', None),
+            'additional_data': {
+                'has_filter': self.card_filter is not None,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         return "play card from discard"
@@ -596,6 +980,25 @@ class SearchLibrary(Effect):
             })
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for searching library."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.LIBRARY_SEARCHED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': context.get('player') or getattr(target, 'controller', None),
+            'additional_data': {
+                'card_count': self.count,
+                'has_filter': self.card_filter is not None,
+                'reveal': self.reveal,
+                'shuffle_after': self.shuffle_after,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return f"search library for {self.count} card{'s' if self.count != 1 else ''}"
 
@@ -612,6 +1015,22 @@ class BodyguardEffect(Effect):
             target.metadata = {'has_bodyguard': True, 'can_enter_exerted': True}
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for bodyguard activation."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.BODYGUARD_ACTIVATED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return "bodyguard"
 
@@ -627,6 +1046,26 @@ class SupportStrengthEffect(Effect):
             if hasattr(target, 'add_strength_bonus'):
                 target.add_strength_bonus(support_char.current_strength, "this_turn")
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for support activation."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        support_char = context.get('ability_owner')
+        support_strength = support_char.current_strength if (support_char and hasattr(support_char, 'current_strength')) else 0
+        
+        return [{
+            'type': GameEvent.SUPPORT_ACTIVATED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'support_character': support_char.name if (support_char and hasattr(support_char, 'name')) else 'Unknown Character',
+                'strength_bonus': support_strength,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         return "add support character's strength"
@@ -659,53 +1098,24 @@ class PreventSingingEffect(Effect):
             target.can_sing = False
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for preventing singing."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.SINGING_PREVENTED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return "prevent singing"
-
-
-class ConditionalStatBonus(Effect):
-    """Conditional stat bonus based on board state."""
-    
-    def __init__(self, strength: int = 0, willpower: int = 0, 
-                 lore: int = 0, condition_func: Callable = None):
-        self.strength = strength
-        self.willpower = willpower  
-        self.lore = lore
-        self.condition_func = condition_func
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        if self.condition_func and self.condition_func(target, context):
-            if hasattr(target, 'strength') and self.strength:
-                target.strength += self.strength
-            if hasattr(target, 'willpower') and self.willpower:
-                target.willpower += self.willpower
-            if hasattr(target, 'lore') and self.lore:
-                target.lore += self.lore
-        return target
-    
-    def __str__(self) -> str:
-        parts = []
-        if self.strength: parts.append(f"+{self.strength}⚔")
-        if self.willpower: parts.append(f"+{self.willpower}◇") 
-        if self.lore: parts.append(f"+{self.lore}⛉")
-        return f"conditional {' '.join(parts)}"
-
-
-class CostReductionEffect(Effect):
-    """Reduces the cost to play a character."""
-    
-    def __init__(self, amount: int, condition_func: Callable = None):
-        self.amount = amount
-        self.condition_func = condition_func
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        if self.condition_func and self.condition_func(target, context):
-            if hasattr(target, 'ink_cost'):
-                target.ink_cost = max(0, target.ink_cost - self.amount)
-        return target
-    
-    def __str__(self) -> str:
-        return f"reduce cost by {self.amount}"
 
 
 class RemoveDamageEffect(Effect):
@@ -724,6 +1134,33 @@ class RemoveDamageEffect(Effect):
             target.damage = max(0, target.damage - remove_amount)
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for removing damage."""
+        if not hasattr(target, 'damage'):
+            return []
+        
+        # Calculate actual amount removed
+        if self.up_to:
+            actual_remove = min(self.amount, target.damage)
+        else:
+            actual_remove = self.amount
+        
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.DAMAGE_REMOVED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'damage_removed': actual_remove,
+                'up_to': self.up_to,
+                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         prefix = "up to " if self.up_to else ""
         return f"remove {prefix}{self.amount} damage"
@@ -739,6 +1176,24 @@ class ReturnCardToHandEffect(Effect):
         # This would interact with game state to move card from discard to hand
         # Implementation depends on game state structure
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for returning card to hand."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.CARD_RETURNED_TO_HAND,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'card_name': target.name if hasattr(target, 'name') else 'Unknown Card',
+                'from_zone': 'discard',
+                'has_filter': self.card_filter is not None,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
     
     def __str__(self) -> str:
         return "return card to hand"
@@ -759,65 +1214,27 @@ class DeckManipulationEffect(Effect):
         # Implementation depends on game state structure
         return target
     
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for deck manipulation."""
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.DECK_LOOKED_AT,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'cards_to_look': self.cards_to_look,
+                'has_filter': self.card_filter is not None,
+                'reveal': self.reveal,
+                'to_hand': self.to_hand,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
     def __str__(self) -> str:
         return f"look at top {self.cards_to_look} cards"
-
-
-class ReadyCharactersEffect(Effect):
-    """Ready characters with specific traits."""
-    
-    def __init__(self, character_filter: Callable = None, exclude_self: bool = True):
-        self.character_filter = character_filter
-        self.exclude_self = exclude_self
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        # This would interact with game state to ready characters
-        # Implementation depends on game state structure
-        return target
-    
-    def __str__(self) -> str:
-        return "ready characters"
-
-
-class BanishTargetEffect(Effect):
-    """Banish the target character."""
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        if hasattr(target, 'banish'):
-            target.banish()
-        return target
-    
-    def __str__(self) -> str:
-        return "banish target"
-
-
-class TemporaryStatModification(Effect):
-    """Temporary stat modification that lasts for a specific duration."""
-    
-    def __init__(self, strength: int = 0, willpower: int = 0, 
-                 lore: int = 0, duration: str = "turn"):
-        self.strength = strength
-        self.willpower = willpower
-        self.lore = lore
-        self.duration = duration
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        # Add temporary modifiers that will be cleaned up based on duration
-        if hasattr(target, 'add_temporary_modifier'):
-            target.add_temporary_modifier(
-                strength=self.strength,
-                willpower=self.willpower, 
-                lore=self.lore,
-                duration=self.duration
-            )
-        return target
-    
-    def __str__(self) -> str:
-        parts = []
-        if self.strength: parts.append(f"{self.strength:+}⚔")
-        if self.willpower: parts.append(f"{self.willpower:+}◇")
-        if self.lore: parts.append(f"{self.lore:+}⛉")
-        return f"temporary {' '.join(parts)} this {self.duration}"
 
 
 class GainLoreEffect(Effect):
@@ -825,152 +1242,71 @@ class GainLoreEffect(Effect):
     
     def __init__(self, amount: int):
         self.amount = amount
+        self._lore_before = None
+        self._lore_after = None
+        self._controller = None
     
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        controller = target if hasattr(target, 'gain_lore') else getattr(target, 'controller', None)
+        # Get the controller who can gain lore
+        controller = self._get_lore_controller(target, context)
+        
         if controller and hasattr(controller, 'gain_lore'):
-            # Set lore gained event before gaining lore
-            game_state = context.get('game_state')
-            if game_state and hasattr(game_state, 'set_last_event'):
-                lore_before = controller.lore
-                game_state.set_last_event(
-                    'LORE_GAINED',
-                    player=controller.name,
-                    lore_amount=self.amount,
-                    source='ability',
-                    ability_name=context.get('ability_name', 'Unknown'),
-                    lore_before=lore_before,
-                    lore_after=lore_before + self.amount
-                )
+            self._controller = controller
+            self._lore_before = controller.lore
             
+            # Gain the lore
             controller.gain_lore(self.amount)
+            
+            self._lore_after = controller.lore
+        
         return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get the LORE_GAINED event for this effect."""
+        if not self._controller:
+            return []
+        
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        return [{
+            'type': GameEvent.LORE_GAINED,
+            'player': self._controller,
+            'source': context.get('source') or context.get('ability_owner'),
+            'additional_data': {
+                'lore_amount': self.amount,
+                'source': 'ability',
+                'ability_name': context.get('ability_name', 'Unknown'),
+                'lore_before': self._lore_before,
+                'lore_after': self._lore_after
+            }
+        }]
+    
+    def _get_lore_controller(self, target: Any, context: Dict[str, Any]) -> Any:
+        """Get the controller who can gain lore."""
+        # First check if target can gain lore directly (target is a player)
+        if hasattr(target, 'gain_lore'):
+            return target
+        
+        # Try to get controller from target
+        if hasattr(target, 'controller') and target.controller:
+            return target.controller
+        
+        # If target doesn't have controller, get from context
+        ability_owner = context.get('ability_owner')
+        if ability_owner and hasattr(ability_owner, 'controller'):
+            return ability_owner.controller
+        
+        # Try getting player directly from context
+        return context.get('player')
     
     def __str__(self) -> str:
         return f"gain {self.amount} lore"
 
 
-class GainLoreEqualToTargetLoreEffect(Effect):
-    """Gain lore equal to target's lore value."""
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        lore_value = getattr(target, 'lore', 0)
-        ability_owner = context.get('ability_owner')
-        if ability_owner and hasattr(ability_owner, 'controller'):
-            controller = ability_owner.controller
-            if hasattr(controller, 'gain_lore'):
-                controller.gain_lore(lore_value)
-        return target
-    
-    def __str__(self) -> str:
-        return "gain lore equal to target's lore"
-
-
-class ExertAllOpposingCharactersEffect(Effect):
-    """Exert all opposing characters."""
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        game_state = context.get('game_state')
-        ability_owner = context.get('ability_owner')
-        
-        if not game_state or not ability_owner:
-            return target
-            
-        for player in game_state.players:
-            if player != ability_owner.controller:
-                for character in player.characters_in_play:
-                    if hasattr(character, 'exerted'):
-                        character.exerted = True
-        return target
-    
-    def __str__(self) -> str:
-        return "exert all opposing characters"
-
-
-class EachOpponentExertsReadyCharacterEffect(Effect):
-    """Each opponent chooses and exerts one ready character."""
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        game_state = context.get('game_state')
-        ability_owner = context.get('ability_owner')
-        
-        if not game_state or not ability_owner:
-            return target
-            
-        for player in game_state.players:
-            if player != ability_owner.controller:
-                ready_chars = [c for c in player.characters_in_play 
-                             if hasattr(c, 'exerted') and not c.exerted]
-                if ready_chars:
-                    # For now, exert the first ready character
-                    # In real implementation, player would choose
-                    ready_chars[0].exerted = True
-        return target
-    
-    def __str__(self) -> str:
-        return "each opponent exerts a ready character"
-
-
-class GainChallengerBuffEffect(Effect):
-    """Gain Challenger +X for specified duration."""
-    
-    def __init__(self, amount: int, duration: str = "turn"):
-        self.amount = amount
-        self.duration = duration
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        if hasattr(target, 'add_temporary_modifier'):
-            target.add_temporary_modifier(
-                challenger_bonus=self.amount,
-                duration=self.duration
-            )
-        return target
-    
-    def __str__(self) -> str:
-        return f"gain Challenger +{self.amount} this {self.duration}"
-
-
-class ReturnSelfToHandEffect(Effect):
-    """Return self to hand if condition is met."""
-    
-    def __init__(self, condition: Callable[[Any, Dict], bool] = None):
-        self.condition = condition or (lambda char, ctx: True)
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        if self.condition(target, context):
-            if hasattr(target, 'controller') and hasattr(target.controller, 'return_to_hand'):
-                target.controller.return_to_hand(target)
-        return target
-    
-    def __str__(self) -> str:
-        return "return self to hand"
-
-
-class GainEvasiveDuringTurnEffect(Effect):
-    """Gain Evasive during controller's turn."""
-    
-    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        game_state = context.get('game_state')
-        if (hasattr(target, 'controller') and 
-            hasattr(game_state, 'current_player') and 
-            target.controller == game_state.current_player):
-            if hasattr(target, 'add_temporary_modifier'):
-                target.add_temporary_modifier(evasive=True, duration="turn")
-        return target
-    
-    def __str__(self) -> str:
-        return "gain Evasive during your turn"
-
-
 # Factory functions for parameterized effects
 def GAIN_LORE(amount: int):
     return GainLoreEffect(amount)
-
-def GAIN_CHALLENGER_BUFF(amount: int, duration: str = "turn"):
-    return GainChallengerBuffEffect(amount, duration)
-
-def RETURN_SELF_TO_HAND(condition_func: Callable[[Any, Dict], bool] = None):
-    return ReturnSelfToHandEffect(condition_func)
 
 
 # Pre-built named ability effects
@@ -979,11 +1315,19 @@ REMOVE_DAMAGE_3 = RemoveDamageEffect(3, up_to=True)
 REMOVE_DAMAGE_2 = RemoveDamageEffect(2, up_to=True)
 RETURN_CHARACTER_TO_HAND = ReturnCardToHandEffect(lambda card: hasattr(card, 'card_type') and card.card_type == 'Character')
 LOOK_AT_TOP_4 = DeckManipulationEffect(4, lambda card: 'Song' in getattr(card, 'card_type', ''), reveal=True)
-BANISH_TARGET = BanishTargetEffect()
-TEMP_STRENGTH_MINUS_2 = TemporaryStatModification(strength=-2)
-TEMP_STRENGTH_PLUS_2 = TemporaryStatModification(strength=2)
 DRAW_CARD = DrawCards(1)
-GAIN_LORE_EQUAL_TO_TARGET_LORE = GainLoreEqualToTargetLoreEffect()
-EXERT_ALL_OPPOSING_CHARACTERS = ExertAllOpposingCharactersEffect()
-EACH_OPPONENT_EXERTS_READY_CHARACTER = EachOpponentExertsReadyCharacterEffect()
-GAIN_EVASIVE_DURING_TURN = GainEvasiveDuringTurnEffect()
+
+
+class NoOpEffect:
+    """Effect that does nothing - used for placeholder abilities."""
+    
+    def apply(self, target: Any, context: dict) -> Any:
+        """Do nothing."""
+        return target
+    
+    def get_events(self, target: Any, context: dict, result: Any) -> List[Dict[str, Any]]:
+        """Get events for no-op effect."""
+        return []
+    
+    def __str__(self) -> str:
+        return "no effect"

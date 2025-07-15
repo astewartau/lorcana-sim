@@ -3,7 +3,7 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import BANISH_TARGET, ConditionalEffect
+from ...effects import BanishCharacter, ConditionalEffect
 from ...target_selectors import TARGET_WITH_COST_CONSTRAINT
 from ...triggers import when_enters_play
 
@@ -47,6 +47,6 @@ def create_my_orders_come_from_jafar(character: Any, ability_data: dict):
         ),
         ConditionalEffect(
             condition=_has_jafar_condition,
-            effect=BANISH_TARGET
+            effect=BanishCharacter()
         )
     )

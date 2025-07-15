@@ -15,6 +15,7 @@ import random
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from src.lorcana_sim.models.game.game_state import GameState, GameAction, Phase, GameResult
+from src.lorcana_sim.engine.event_system import GameEvent
 from src.lorcana_sim.engine.stepped_game_engine import SteppedGameEngine
 from src.lorcana_sim.engine.game_messages import (
     MessageType, ActionRequiredMessage, ChoiceRequiredMessage, 
@@ -189,10 +190,6 @@ def print_board_state(game_state):
         if len(tace.inkwell) > 5:
             print(f"      ... and {len(tace.inkwell) - 5} more")
     
-    print(f"{'='*60}")
-    print(f"▶️  Current: {current.name}'s {game_state.current_phase.value} phase")
-
-
 
 
 def choose_strategic_move(message: ActionRequiredMessage) -> GameMove:
@@ -314,7 +311,154 @@ def display_step_message(message: StepExecutedMessage):
     step_id = message.step_id
     description = message.description
     
-    if "ability_triggered" in step_id.lower():
+    # Handle new event_data structure if present
+    if hasattr(message, 'event_data') and message.event_data and isinstance(message.event_data, dict):
+        event_data = message.event_data
+        event = event_data.get('event')
+        context = event_data.get('context', {})
+        
+        # Handle GameEvent enum-based events
+        if event == GameEvent.CHARACTER_READIED:
+            if 'character_name' in context:
+                char_name = context['character_name']
+                reason = context.get('reason', '')
+                if reason == 'ink_dried':
+                    print(f"💧 {char_name} ink dried")
+                elif reason == 'ready_step':
+                    print(f"🔄 {char_name} readied")
+                else:
+                    print(f"🔄 {char_name} readied")
+            elif 'item_name' in context:
+                item_name = context['item_name']
+                print(f"🔄 {item_name} (item) readied")
+            return
+            
+        elif event == GameEvent.CARD_DRAWN:
+            player_name = context.get('player_name', 'Unknown Player')
+            if context.get('draw_failed'):
+                print(f"📚 {player_name} attempted to draw but deck is empty")
+            else:
+                card_name = context.get('card_name', 'Unknown Card')
+                print(f"📚 {player_name} drew {card_name}")
+            return
+            
+        elif event == GameEvent.DRAW_STEP:
+            player_name = context.get('player_name', 'Unknown Player')
+            if context.get('action') == 'skipped' and context.get('reason') == 'first_turn':
+                print(f"📚 {player_name} skipped first turn draw")
+            return
+            
+        elif event == GameEvent.GAME_ENDS:
+            result = context.get('result')
+            if result == 'lore_victory':
+                winner_name = context.get('winner_name', 'Unknown')
+                lore = context.get('lore', 0)
+                print(f"🏆 {winner_name} wins with {lore} lore!")
+            elif result == 'deck_exhaustion':
+                winner_name = context.get('winner_name', 'Unknown')
+                loser_name = context.get('loser_name', 'Unknown')
+                print(f"🏆 {winner_name} wins - {loser_name} ran out of cards!")
+            elif result == 'stalemate':
+                passes = context.get('consecutive_passes', 0)
+                print(f"🏆 Game ended in stalemate - both players unable to make progress")
+            return
+    
+    # Handle structured effect data from action queue
+    if hasattr(message, 'effect_data') and message.effect_data:
+        effect_data = message.effect_data
+        effect_type = effect_data.get('type')
+        
+        if effect_type == 'discard_card':
+            card_name = effect_data.get('card_name', 'Unknown Card')
+            player_name = effect_data.get('player_name', 'Unknown Player')
+            print(f"🗑️ {player_name} discarded {card_name}")
+            return
+            
+        elif effect_type == 'gain_lore':
+            amount = effect_data.get('amount', 0)
+            print(f"⭐ Gained {amount} lore")
+            return
+            
+        elif effect_type == 'draw_cards':
+            count = effect_data.get('count', 1)
+            card_text = "card" if count == 1 else "cards"
+            print(f"📚 Drew {count} {card_text}")
+            return
+            
+        elif effect_type == 'banish_character':
+            character_name = effect_data.get('character_name', 'Unknown Character')
+            print(f"💀 Banished {character_name}")
+            return
+            
+        elif effect_type == 'return_to_hand':
+            card_name = effect_data.get('card_name', 'Unknown Card')
+            print(f"↩️ Returned {card_name} to hand")
+            return
+            
+        elif effect_type == 'exert_character':
+            character_name = effect_data.get('character_name', 'Unknown Character')
+            print(f"💤 Exerted {character_name}")
+            return
+            
+        elif effect_type == 'ready_character':
+            character_name = effect_data.get('character_name', 'Unknown Character')
+            print(f"✨ Readied {character_name}")
+            return
+            
+        elif effect_type == 'remove_damage':
+            amount = effect_data.get('amount', 0)
+            character_name = effect_data.get('character_name', 'Unknown Character')
+            print(f"❤️‍🩹 Removed {amount} damage from {character_name}")
+            return
+            
+        elif effect_type == 'generic':
+            # Handle generic effects with available data
+            effect_str = effect_data.get('effect_str', 'Unknown Effect')
+            target_name = effect_data.get('target_name', 'Unknown Target')
+            source_desc = effect_data.get('source_description', '')
+            
+            if source_desc and "(sub-effect)" in source_desc:
+                print(f"📋 {effect_str}")
+            else:
+                formatted_desc = f"📋 {effect_str} on {target_name}"
+                if source_desc:
+                    formatted_desc = f"{source_desc}: {formatted_desc}"
+                print(formatted_desc)
+            return
+    
+    # Handle conditional effects with structured data
+    if step_id == "conditional_effect_applied" and hasattr(message, 'event_data'):
+        event_data = message.event_data
+        source = event_data.get('source', 'Unknown')
+        ability_name = event_data.get('ability_name', 'Unknown Ability')
+        details = event_data.get('details', {})
+        
+        if details.get('ability_type') == 'keyword':
+            ability = details.get('ability_name', 'unknown ability')
+            action = details.get('action', 'affected')
+            description = f"✨ {source} {action} {ability} ({ability_name})"
+        else:
+            description = f"✨ {source} - {ability_name} activated"
+        
+        print(description)
+        return
+        
+    elif step_id == "conditional_effect_removed" and hasattr(message, 'event_data'):
+        event_data = message.event_data
+        source = event_data.get('source', 'Unknown')
+        ability_name = event_data.get('ability_name', 'Unknown Ability')
+        details = event_data.get('details', {})
+        
+        if details.get('ability_type') == 'keyword':
+            ability = details.get('ability_name', 'unknown ability')
+            description = f"✨ {source} lost {ability} ({ability_name} ended)"
+        else:
+            description = f"✨ {source} - {ability_name} deactivated"
+        
+        print(description)
+        return
+    
+    elif "ability_triggered" in step_id.lower():
         print(f"✨ {description}")
     elif "character_readied" in step_id.lower() or "readied" in description:
         print(f"🔄 {description}")
@@ -339,7 +483,11 @@ def display_step_message(message: StepExecutedMessage):
     elif "phase" in step_id.lower() or "Advanced" in description:
         print(f"⚙️  {description}")
     elif "turn_ended" in step_id.lower() or "Turn ended" in description:
-        print(f"🔄 {description}")
+        # Turn transitions now use the same format as phase transitions
+        if " → " in description and "phase" in description:
+            print(f"⚙️  {description}")
+        else:
+            print(f"🔄 {description}")
     else:
         # Generic step display
         print(f"📋 {description}")
@@ -361,7 +509,6 @@ def simulate_random_game():
     last_turn_number = 0
     
     print_board_state(game_state)
-    print()
     
     # Get first message
     message = engine.next_message()
@@ -377,14 +524,14 @@ def simulate_random_game():
         elif isinstance(message, ActionRequiredMessage):
             # Show turn transition if needed
             if game_state.turn_number != last_turn_number:
-                # Show board state at start of each new turn (except turn 1)
-                if last_turn_number > 0:
-                    print()
-                    print_board_state(game_state)
-                    print()
-                
                 print(f"⚪ {message.player.name} begins turn {game_state.turn_number} - {message.phase.value} phase")
                 last_turn_number = game_state.turn_number
+            
+            # Show board state only at start of ready phase
+            if message.phase.value == 'ready':
+                # Show board state at start of each ready phase (except turn 1)
+                if game_state.turn_number > 1:
+                    print_board_state(game_state)
             
             # Choose a move strategically
             move = choose_strategic_move(message)
@@ -400,12 +547,6 @@ def simulate_random_game():
         elif isinstance(message, StepExecutedMessage):
             # Display the step that was executed
             display_step_message(message)
-            
-            # Check if this was a turn ending action and show board state
-            if 'turn_ended' in message.step_id:
-                print()
-                print_board_state(game_state)
-                print()
                 
         elif isinstance(message, ChoiceRequiredMessage):
             # Handle player choice
@@ -413,6 +554,10 @@ def simulate_random_game():
             message = engine.next_message(choice_move)
             # Continue processing this message in the same iteration
             continue
+
+        else:
+            # Handle any other message types (e.g., info messages)
+            print(f"ℹ️  {message.description}")
         
         # Get next message for next iteration
         message = engine.next_message()
@@ -426,13 +571,28 @@ def simulate_random_game():
     
     # Display final game result
     if game_state.is_game_over():
-        result, winner, reason = game_state.get_game_result()
-        print(f"🏆 {reason}")
+        result, winner, game_over_data = game_state.get_game_result()
+        if game_over_data:
+            event = game_over_data.get('event')
+            context = game_over_data.get('context', {})
+            
+            if event == GameEvent.GAME_ENDS:
+                result_type = context.get('result')
+                if result_type == 'lore_victory':
+                    winner_name = context.get('winner_name', 'Unknown')
+                    lore = context.get('lore', 0)
+                    print(f"🏆 {winner_name} wins with {lore} lore!")
+                elif result_type == 'deck_exhaustion':
+                    winner_name = context.get('winner_name', 'Unknown')
+                    loser_name = context.get('loser_name', 'Unknown')
+                    print(f"🏆 {winner_name} wins - {loser_name} ran out of cards!")
+                elif result_type == 'stalemate':
+                    print(f"🏆 Game ended in stalemate - both players unable to make progress")
     else:
         print("🏆 Game ended without completion (message limit reached)")
 
 
 if __name__ == "__main__":
     # Set random seed for reproducible results (remove for true randomness)
-    random.seed()
+    random.seed(49)
     simulate_random_game()

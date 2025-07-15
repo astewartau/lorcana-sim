@@ -32,7 +32,9 @@ class ComposableListener:
             'event_context': event_context,
             'source': event_context.source,
             'game_state': event_context.game_state,
-            'player': event_context.player
+            'player': event_context.player,
+            'ability_name': self.name,
+            'ability_owner': event_context.source
         }
         
         # Add ability owner info if available
@@ -173,9 +175,8 @@ class ComposableAbility:
         self._registered_events.clear()
         self._event_manager = None
     
-    # Compatibility methods for existing ability system
     def get_ability_type(self) -> str:
-        """Get ability type for compatibility."""
+        """Get ability type."""
         return "composable"
     
     def modifies_game_rules(self) -> bool:
@@ -188,7 +189,7 @@ class ComposableAbility:
         return False
     
     def allows_ability_targeting(self, source_type: str, target_type: str) -> bool:
-        """Check if this ability allows targeting (for Ward compatibility)."""
+        """Check if this ability allows targeting."""
         # Check if any listeners prevent targeting
         from .effects import PreventEffect
         for listener in self.listeners:
@@ -197,7 +198,7 @@ class ComposableAbility:
         return True
     
     def can_sing_song(self, required_cost: int) -> bool:
-        """Check if this ability allows singing songs (for Singer compatibility)."""
+        """Check if this ability allows singing songs."""
         from .effects import ModifySongCost
         for listener in self.listeners:
             if isinstance(listener.effect, ModifySongCost):
@@ -305,12 +306,3 @@ def quick_ability(name: str, character: Any, trigger_condition: Callable,
             .add_trigger(trigger_condition, target_selector, effect))
 
 
-# =============================================================================
-# ADAPTATION HELPERS FOR EXISTING SYSTEM
-# =============================================================================
-
-def adapt_legacy_ability(legacy_ability: Any, character: Any) -> ComposableAbility:
-    """Adapt a legacy ability to composable format."""
-    # This would analyze the legacy ability and create equivalent composable version
-    # For now, just create a basic wrapper
-    return ComposableAbility(f"Adapted {legacy_ability.name}", character)

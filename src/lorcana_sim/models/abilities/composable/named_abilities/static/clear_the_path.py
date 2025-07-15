@@ -3,30 +3,41 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import CostReductionEffect
+from ...effects import CostModification
 from ...target_selectors import SELF
 from ...triggers import when_any_enters_play, when_leaves_play, or_conditions
 
 
-def _clear_the_path_condition(character: Any, context: dict) -> bool:
-    """Check for cost reduction based on opponents' exerted characters."""
-    if not hasattr(character, 'controller') or not context.get('game_state'):
-        return False
+class ClearThePathEffect:
+    """Dynamic cost reduction based on opponents' exerted characters."""
     
-    game_state = context['game_state']
-    controller = character.controller
+    def apply(self, target: Any, context: dict) -> Any:
+        if not hasattr(target, 'controller') or not context.get('game_state'):
+            return target
+        
+        game_state = context['game_state']
+        controller = target.controller
+        
+        # Count exerted characters opponents control
+        exerted_count = 0
+        for player in game_state.players:
+            if player != controller:  # Opponent
+                for char in player.characters_in_play:
+                    if hasattr(char, 'exerted') and char.exerted:
+                        exerted_count += 1
+        
+        # Apply cost reduction equal to number of exerted opponents
+        if exerted_count > 0:
+            cost_reduction = CostModification(cost_change=-exerted_count)
+            cost_reduction.apply(target, context)
+        
+        return target
     
-    # Count exerted characters opponents control
-    exerted_count = 0
-    for player in game_state.players:
-        if player != controller:  # Opponent
-            for char in player.characters_in_play:
-                if hasattr(char, 'is_exerted') and char.is_exerted:
-                    exerted_count += 1
+    def get_events(self, target: Any, context: dict, result: Any) -> list:
+        return []
     
-    # Store the reduction amount for the effect
-    character._clear_the_path_reduction = exerted_count
-    return exerted_count > 0
+    def __str__(self) -> str:
+        return "reduce cost by 1 for each exerted opponent character"
 
 
 @register_named_ability("CLEAR THE PATH")
@@ -43,8 +54,5 @@ def create_clear_the_path(character: Any, ability_data: dict):
             when_leaves_play(None)
         ),
         SELF,
-        CostReductionEffect(
-            amount=lambda char, ctx: getattr(char, '_clear_the_path_reduction', 0),
-            condition_func=_clear_the_path_condition
-        )
+        ClearThePathEffect()
     )

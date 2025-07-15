@@ -3,7 +3,7 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import GAIN_CHALLENGER_BUFF
+from ...effects import ChallengerEffect
 from ...target_selectors import SELF
 from ...triggers import when_card_drawn
 
@@ -19,5 +19,5 @@ def create_heavily_armed(character: Any, ability_data: dict):
         character,
         when_card_drawn(character.controller),
         SELF,
-        GAIN_CHALLENGER_BUFF(1, duration="turn")
+        ChallengerEffect(1)
     )

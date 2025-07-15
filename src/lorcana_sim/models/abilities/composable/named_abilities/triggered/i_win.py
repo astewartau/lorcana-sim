@@ -3,7 +3,7 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import RETURN_SELF_TO_HAND
+from ...effects import ReturnToHand, ConditionalEffect
 from ...target_selectors import SELF
 from ...triggers import when_banished
 
@@ -38,5 +38,8 @@ def create_i_win(character: Any, ability_data: dict):
         character,
         when_banished(character),
         SELF,
-        RETURN_SELF_TO_HAND(condition_func=_has_most_cards_condition)
+        ConditionalEffect(
+            condition=_has_most_cards_condition,
+            effect=ReturnToHand()
+        )
     )

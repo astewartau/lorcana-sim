@@ -18,6 +18,7 @@ from .game_messages import (
     StepExecutedMessage, GameOverMessage, LegalAction
 )
 from .game_moves import GameMove, ActionMove, ChoiceMove, InkMove, PlayMove, QuestMove, ChallengeMove, SingMove, PassMove
+from .action_queue import ActionQueue, ActionPriority, QueuedAction
 
 
 class SteppedGameEngine(GameEngine):
@@ -32,6 +33,9 @@ class SteppedGameEngine(GameEngine):
         self.waiting_for_input = False
         self.current_choice = None
         
+        # Action queue for atomic execution
+        self.action_queue = ActionQueue(self.event_manager)
+        
         # Step-by-step components
         self.step_engine = StepProgressionEngine(execution_mode)
         self.input_manager = InputManager()
@@ -44,6 +48,70 @@ class SteppedGameEngine(GameEngine):
         
         # Track current action being executed
         self.current_action_steps: List[GameStep] = []
+        
+        # Conditional effect evaluation
+        self._condition_evaluator = None
+    
+    def execute_action(self, action, parameters):
+        """Override execute_action to capture and queue event messages."""
+        # Capture last event before action
+        last_event_before = self.get_last_event()
+        timestamp_before = last_event_before.get('timestamp', -1) if last_event_before else -1
+        
+        # Execute the action using parent implementation
+        result = super().execute_action(action, parameters)
+        
+        # Check for new events and queue messages
+        last_event_after = self.get_last_event()
+        timestamp_after = last_event_after.get('timestamp', -1) if last_event_after else -1
+        
+        # If there's a new event, queue a message for it
+        if last_event_after and timestamp_after > timestamp_before:
+            self._queue_game_event_message(last_event_after)
+        
+        # Check for ability triggers during draw phase
+        if action.value == 'PROGRESS' and self.game_state.current_phase.value == 'draw':
+            self._check_for_ability_triggers()
+        
+        return result
+    
+    def _queue_game_event_message(self, event: dict) -> None:
+        """Queue a message for a game event from the regular game engine."""
+        event_type = event.get('type')
+        player_name = event.get('player', 'Unknown')
+        
+        if event_type == 'card_drawn':
+            # Queue draw event message
+            cards_drawn = event.get('cards_drawn', [])
+            for card in cards_drawn:
+                card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
+                draw_message = StepExecutedMessage(
+                    type=MessageType.STEP_EXECUTED,
+                    player=self.game_state.current_player,
+                    step_id=f"card_drawn_{card_name}",
+                    description=f"📚 {player_name} drew {card_name}",
+                    result="Drew"
+                )
+                self.message_queue.append(draw_message)
+    
+    def _check_for_ability_triggers(self) -> None:
+        """Check for ability triggers and queue messages for them."""
+        # Check if Royal Guard has gained challenger bonus (indicating HEAVILY ARMED triggered)
+        current_player = self.game_state.current_player
+        for character in current_player.characters_in_play:
+            if character.name == "Royal Guard" and character.current_challenger_bonus > 0:
+                # Check if this is a new bonus from this turn
+                for amount, duration in character.challenger_bonuses:
+                    if duration in ["turn", "this_turn"]:
+                        ability_message = StepExecutedMessage(
+                            type=MessageType.STEP_EXECUTED,
+                            player=current_player,
+                            step_id=f"heavily_armed_trigger",
+                            description=f"⚔️ {character.name} gained Challenger +{amount} from HEAVILY ARMED",
+                            result="Activated"
+                        )
+                        self.message_queue.append(ability_message)
+                        break
     
     def next_message(self, move: Optional[GameMove] = None) -> GameMessage:
         """Get the next message in the game progression."""
@@ -52,14 +120,41 @@ class SteppedGameEngine(GameEngine):
         if move and self.waiting_for_input:
             self._process_move(move)
             self.waiting_for_input = False
+            
+            # Evaluate conditional effects after move processing
+            self._evaluate_conditional_effects_after_move(move)
         
         # Return queued messages first
         if self.message_queue:
-            return self.message_queue.popleft()
+            message = self.message_queue.popleft()
+            # Apply deferred action if this message has one
+            if hasattr(message, 'deferred_action') and message.deferred_action:
+                # Apply the deferred effect now
+                try:
+                    result = message.deferred_action.effect.apply(message.deferred_action.target, message.deferred_action.context)
+                    
+                    # Note: We don't queue additional events here anymore since composite effects
+                    # are now split into individual actions, each with their own message.
+                    # The individual effects will generate their own events when applied.
+                            
+                except Exception as e:
+                    print(f"DEBUG: Error applying deferred action: {e}")
+            return message
+        
+        # Process pending actions from action queue (highest priority)
+        if self.action_queue.has_pending_actions():
+            message = self._process_next_queued_action()
+            if message:
+                return message
         
         # Execute next step if available
         if self.current_steps:
-            return self._execute_next_step()
+            message = self._execute_next_step()
+            
+            # Evaluate conditional effects after step execution
+            self._evaluate_conditional_effects_after_step()
+            
+            return message
         
         # Check for choices
         if self.current_choice or self.is_paused_for_choice():
@@ -77,7 +172,23 @@ class SteppedGameEngine(GameEngine):
         
         # Check game over
         if self.game_state.is_game_over():
-            result, winner, reason = self.game_state.get_game_result()
+            result, winner, game_over_data = self.game_state.get_game_result()
+            # Build reason string from game_over_data for backward compatibility
+            reason = ""
+            if game_over_data:
+                context = game_over_data.get('context', {})
+                result_type = context.get('result')
+                if result_type == 'lore_victory':
+                    winner_name = context.get('winner_name', 'Unknown')
+                    lore = context.get('lore', 0)
+                    reason = f"{winner_name} wins with {lore} lore!"
+                elif result_type == 'deck_exhaustion':
+                    winner_name = context.get('winner_name', 'Unknown')
+                    loser_name = context.get('loser_name', 'Unknown')
+                    reason = f"{winner_name} wins - {loser_name} ran out of cards!"
+                elif result_type == 'stalemate':
+                    reason = "Game ended in stalemate - both players unable to make progress"
+            
             return GameOverMessage(
                 type=MessageType.GAME_OVER,
                 player=self.game_state.current_player,
@@ -129,8 +240,9 @@ class SteppedGameEngine(GameEngine):
                         type=MessageType.STEP_EXECUTED,
                         player=self.game_state.current_player,
                         step_id=f"character_readied",
-                        description=readied_item,
-                        result="Readied"
+                        description="Character readied",  # Generic description
+                        result="Readied",
+                        event_data=readied_item  # Pass the full event data
                     )
                     self.message_queue.append(ready_message)
                 # Clear the flag
@@ -188,8 +300,28 @@ class SteppedGameEngine(GameEngine):
                     old_name = old_phase.value if old_phase and hasattr(old_phase, 'value') else 'phase'
                     new_name = new_phase.value if new_phase and hasattr(new_phase, 'value') else 'phase'
                     description = f"{old_name} → {new_name} phase"
+                    
+                    # Evaluate conditional effects on phase change
+                    self._evaluate_conditional_effects_on_phase_change()
                 elif result_type == "turn_ended":
-                    description = "Turn ended"
+                    # Create cleaner turn transition message
+                    old_player = result.data.get('old_player') if result.data else None
+                    new_player = result.data.get('new_player') if result.data else None
+                    new_phase = result.data.get('new_phase') if result.data else None
+                    
+                    if old_player and new_player and new_phase:
+                        old_name = old_player.name.split(' ')[0]  # Just first name
+                        new_name = new_player.name.split(' ')[0]  # Just first name  
+                        phase_name = new_phase.value if hasattr(new_phase, 'value') else str(new_phase)
+                        description = f"play ({old_name}) → {phase_name} phase ({new_name})"
+                    else:
+                        description = "Turn ended"
+                    
+                    # Process end-of-turn effect expiration
+                    self._process_turn_end_effects()
+                    
+                    # Note: Don't evaluate conditional effects here - the turn hasn't actually changed yet!
+                    # This will be done after the actual turn transition in the game engine
                 else:
                     description = result_type.replace('_', ' ').title()
             
@@ -223,8 +355,9 @@ class SteppedGameEngine(GameEngine):
                         type=MessageType.STEP_EXECUTED,
                         player=self.game_state.current_player,
                         step_id=f"character_readied",
-                        description=readied_item,
-                        result="Readied"
+                        description="Character readied",  # Generic description
+                        result="Readied",
+                        event_data=readied_item  # Pass the full event data
                     )
                     self.message_queue.append(ready_message)
             
@@ -235,8 +368,9 @@ class SteppedGameEngine(GameEngine):
                         type=MessageType.STEP_EXECUTED,
                         player=self.game_state.current_player,
                         step_id=f"card_drawn",
-                        description=draw_event,
-                        result="Drew"
+                        description="Card drawn",  # Generic description
+                        result="Drew",
+                        event_data=draw_event  # Pass the full event data
                     )
                     self.message_queue.append(draw_message)
             
@@ -251,6 +385,39 @@ class SteppedGameEngine(GameEngine):
                         result="Banished"
                     )
                     self.message_queue.append(banish_message)
+            
+            # Check for zone events (conditional effect activations) and queue them as separate messages
+            if result.data and result.data.get('zone_events'):
+                for zone_event in result.data['zone_events']:
+                    event_type = zone_event.get('type', 'UNKNOWN_EVENT')
+                    
+                    if event_type == 'CONDITIONAL_EFFECT_APPLIED':
+                        from .game_event_types import GameEventType
+                        
+                        zone_message = StepExecutedMessage(
+                            type=MessageType.STEP_EXECUTED,
+                            player=self.game_state.current_player,
+                            step_id=GameEventType.CONDITIONAL_EFFECT_APPLIED.value,
+                            description="",  # No description - let display layer handle it
+                            result="Applied"
+                        )
+                        # Store the raw event data
+                        zone_message.event_data = zone_event
+                        self.message_queue.append(zone_message)
+                    
+                    elif event_type == 'CONDITIONAL_EFFECT_REMOVED':
+                        from .game_event_types import GameEventType
+                        
+                        zone_message = StepExecutedMessage(
+                            type=MessageType.STEP_EXECUTED,
+                            player=self.game_state.current_player,
+                            step_id=GameEventType.CONDITIONAL_EFFECT_REMOVED.value,
+                            description="",  # No description - let display layer handle it
+                            result="Removed"
+                        )
+                        # Store the raw event data
+                        zone_message.event_data = zone_event
+                        self.message_queue.append(zone_message)
     
     def _convert_to_action_move(self, move: GameMove) -> ActionMove:
         """Convert specific move types to generic action moves."""
@@ -322,6 +489,213 @@ class SteppedGameEngine(GameEngine):
                 result=f"Error: {str(e)}"
             )
     
+    def _process_next_queued_action(self) -> Optional[GameMessage]:
+        """Process the next action from the action queue and return a message."""
+        result = self.action_queue.process_next_action()
+        if not result:
+            return None
+        
+        return self._create_action_message(result)
+    
+    def _create_action_message(self, result) -> Optional[GameMessage]:
+        """Create a message from an action result."""
+        if not result:
+            return None
+        
+        # Get the action that was just executed from the result
+        executed_action = result.queued_action  # This contains the action info
+        
+        # Create a message based on the action result
+        if result.success:
+            # Create specific descriptions based on the events emitted
+            if result.events_emitted:
+                # Create separate messages for each event
+                messages = []
+                for event in result.events_emitted:
+                    message = self._create_event_message(event)
+                    if message:
+                        messages.append(message)
+                
+                # For now, return the first message (we'll need to queue the rest)
+                # TODO: Handle multiple messages properly
+                if messages:
+                    for msg in messages[1:]:  # Queue additional messages
+                        self.message_queue.append(msg)
+                    return messages[0]
+            
+            # Store structured effect data for UI to format
+            effect_data = self._extract_effect_data(executed_action, result)
+            description = "Action completed"  # Fallback text
+            
+            message = StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step_id=f"action_{result.action_id}",
+                description=description,
+                result="Completed",
+                deferred_action=result.queued_action  # Store the action for later execution
+            )
+            # Add structured effect data for UI formatting
+            message.effect_data = effect_data
+            return message
+        else:
+            # Error occurred
+            return StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step_id=f"action_{result.action_id}_error",
+                description=f"Action failed: {result.error}",
+                result="Failed"
+            )
+    
+    def _extract_effect_data(self, executed_action, result) -> dict:
+        """Extract structured data about an executed effect for UI formatting."""
+        if not executed_action:
+            return {"type": "unknown"}
+        
+        from ..models.abilities.composable.effects import (
+            DiscardCard, GainLoreEffect, DrawCards, BanishCharacter, 
+            ReturnToHand, ExertCharacter, ReadyCharacter, RemoveDamageEffect
+        )
+        
+        effect = executed_action.effect
+        target = executed_action.target
+        
+        # Extract structured data based on effect type
+        if isinstance(effect, DiscardCard):
+            # For discard effects, get the card name and player name
+            card_name = getattr(target, 'name', str(target))
+            
+            # Debug: print what we're working with
+            print(f"DEBUG DISCARD: target={target}, target.name={getattr(target, 'name', 'NO NAME')}")
+            print(f"DEBUG DISCARD: target type={type(target)}")
+            #print(f"DEBUG DISCARD: context={executed_action.context}")
+            
+            # Get player name from the controller or game context
+            if hasattr(target, 'controller') and target.controller:
+                player_name = getattr(target.controller, 'name', 'Unknown Player')
+            else:
+                # Fallback: look in execution context for player info
+                context_player = executed_action.context.get('player')
+                if context_player and hasattr(context_player, 'name'):
+                    player_name = context_player.name
+                else:
+                    player_name = 'Unknown Player'
+            
+            return {
+                "type": "discard_card",
+                "card_name": card_name,
+                "player_name": player_name,
+                "target": target
+            }
+        
+        elif isinstance(effect, GainLoreEffect):
+            return {
+                "type": "gain_lore",
+                "amount": effect.amount,
+                "target": target
+            }
+        
+        elif isinstance(effect, DrawCards):
+            return {
+                "type": "draw_cards",
+                "count": effect.count,
+                "target": target
+            }
+        
+        elif isinstance(effect, BanishCharacter):
+            return {
+                "type": "banish_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, ReturnToHand):
+            return {
+                "type": "return_to_hand",
+                "card_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, ExertCharacter):
+            return {
+                "type": "exert_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, ReadyCharacter):
+            return {
+                "type": "ready_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, RemoveDamageEffect):
+            return {
+                "type": "remove_damage",
+                "amount": effect.amount,
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        else:
+            # Generic effect data
+            return {
+                "type": "generic",
+                "effect_class": type(effect).__name__,
+                "effect_str": str(effect),
+                "target_name": getattr(target, 'name', str(target)),
+                "target": target,
+                "source_description": executed_action.source_description
+            }
+    
+    def _create_event_message(self, event: dict) -> Optional[GameMessage]:
+        """Create a message from an event."""
+        event_type = event.get('type')
+        player = event.get('player')
+        additional_data = event.get('additional_data', {})
+        
+        description = ""
+        
+        if event_type and hasattr(event_type, 'value'):
+            if event_type.value == 'CARD_DISCARDED':
+                card_name = additional_data.get('card_name', 'Unknown Card')
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                description = f"🗑 {player_name} discarded {card_name}"
+            
+            elif event_type.value == 'LORE_GAINED':
+                lore_amount = additional_data.get('lore_amount', 0)
+                lore_after = additional_data.get('lore_after', 0)
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                description = f"⭐ {player_name} gained {lore_amount} lore → {lore_after} total"
+            
+            elif event_type.value == 'CARD_DRAWN':
+                card_name = additional_data.get('card_name', 'Unknown Card')
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                description = f"📚 {player_name} drew {card_name}"
+            
+            elif event_type.value == 'CHARACTER_BANISHED':
+                char_name = additional_data.get('character_name', 'Unknown Character')
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                description = f"💀 {char_name} was banished"
+            
+            elif event_type.value == 'CARD_RETURNED_TO_HAND':
+                card_name = additional_data.get('card_name', 'Unknown Card')
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                description = f"🔄 {card_name} returned to {player_name}'s hand"
+        
+        if description:
+            return StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step_id=f"event_{event_type.value if hasattr(event_type, 'value') else 'unknown'}",
+                description=description,
+                result="Completed"
+            )
+        
+        return None
+    
     def _resolve_choice(self, choice_id: str, option: str) -> None:
         """Resolve a player choice."""
         # Capture the last event timestamp before choice resolution
@@ -335,31 +709,59 @@ class SteppedGameEngine(GameEngine):
         # Clear any previous choice events
         self.game_state.choice_events.clear()
         
-        success = self.provide_player_choice(choice_id, option)
+        # Override the choice execution to ensure game state has choice_events
+        original_provide_choice = self.choice_manager.provide_choice
+        def wrapped_provide_choice(choice_id, selected_option):
+            # Ensure choice_events is available during effect execution
+            if not hasattr(self.game_state, 'choice_events'):
+                self.game_state.choice_events = []
+            
+            # Also ensure the context in the current choice includes the correct game state and action queue
+            if self.choice_manager.current_choice:
+                context = self.choice_manager.current_choice.trigger_context.get('_choice_execution_context', {})
+                context['game_state'] = self.game_state
+                context['action_queue'] = self.action_queue  # Add action queue for deferred execution
+                self.choice_manager.current_choice.trigger_context['_choice_execution_context'] = context
+                
+            return original_provide_choice(choice_id, selected_option)
+        
+        # Temporarily replace the method
+        self.choice_manager.provide_choice = wrapped_provide_choice
+        
+        try:
+            success = self.provide_player_choice(choice_id, option)
+        finally:
+            # Restore original method
+            self.choice_manager.provide_choice = original_provide_choice
+            
         if not success:
             raise ValueError(f"Failed to resolve choice {choice_id} with option {option}")
         
-        # Check for multiple events that occurred during choice resolution
-        # First check if there are collected choice events
-        if hasattr(self.game_state, 'choice_events') and self.game_state.choice_events:
-            # Process all collected events
-            for event in self.game_state.choice_events:
-                self._queue_choice_event_message(event)
-            # Clear the events after processing
-            self.game_state.choice_events.clear()
-        else:
-            # Fallback to single event detection
-            last_event_after = getattr(self.game_state, 'last_event', None)
-            timestamp_after = last_event_after.get('timestamp', -1) if last_event_after else -1
-            if (last_event_after and timestamp_after > timestamp_before):
-                self._queue_choice_event_message(last_event_after)
+        # After choice resolution, check if actions were queued and need to be processed
+        if self.action_queue.has_pending_actions():
+            # Process actions but DON'T apply effects yet - just prepare messages
+            # Process ALL actions at once to ensure composite effects are fully split
+            while self.action_queue.has_pending_actions():
+                result = self.action_queue.process_next_action(apply_effect=False)
+                if result:
+                    # Create a message for this action (with deferred effect)
+                    message = self._create_action_message(result)
+                    if message:
+                        self.message_queue.append(message)
+        
+        # NOTE: choice_events processing is disabled since we now use the action queue
+        # for deferred execution. Events will be processed when deferred actions are applied.
     
     def _queue_choice_event_message(self, event: dict) -> None:
         """Queue a message for a choice-triggered event."""
         event_type = event.get('type')
         player_name = event.get('player', 'Unknown')
         
-        if event_type == 'CARD_DRAWN':
+        
+        # Handle both enum objects and string values
+        event_type_str = event_type.value if hasattr(event_type, 'value') else str(event_type)
+        
+        if event_type_str == 'card_drawn':
             # Queue draw event messages for choice-triggered draws
             cards_drawn = event.get('cards_drawn', [])
             for card in cards_drawn:
@@ -372,10 +774,39 @@ class SteppedGameEngine(GameEngine):
                     result="Drew"
                 )
                 self.message_queue.append(draw_message)
+        elif event_type_str == 'stat_modified':
+            # Handle stat modification events (like damage)
+            target = event.get('target')
+            additional_data = event.get('additional_data', {})
+            stat_name = additional_data.get('stat_name', 'stat')
+            stat_change = additional_data.get('stat_change', 0)
+            
+            if target and hasattr(target, 'name'):
+                target_name = target.name
+                if stat_name == 'damage' and stat_change > 0:
+                    # Damage dealt
+                    damage_message = StepExecutedMessage(
+                        type=MessageType.STEP_EXECUTED,
+                        player=self.game_state.current_player,
+                        step_id=f"damage_dealt",
+                        description=f"💥 {target_name} takes {stat_change} damage",
+                        result="Damaged"
+                    )
+                    self.message_queue.append(damage_message)
+                elif stat_name == 'damage' and stat_change < 0:
+                    # Healing
+                    heal_message = StepExecutedMessage(
+                        type=MessageType.STEP_EXECUTED,
+                        player=self.game_state.current_player,
+                        step_id=f"healing",
+                        description=f"💚 {target_name} heals {-stat_change} damage",
+                        result="Healed"
+                    )
+                    self.message_queue.append(heal_message)
         
-        elif event_type == 'CARD_DISCARDED':
+        elif event_type_str == 'card_discarded':
             # Queue discard event messages for choice-triggered discards
-            card_name = event.get('card_name', 'Unknown Card')
+            card_name = event.get('additional_data', {}).get('card_name', 'Unknown Card')
             discard_message = StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
                 player=self.game_state.current_player,
@@ -385,10 +816,10 @@ class SteppedGameEngine(GameEngine):
             )
             self.message_queue.append(discard_message)
         
-        elif event_type == 'LORE_GAINED':
+        elif event_type_str == 'lore_gained':
             # Queue lore gain event messages for choice-triggered lore gains
-            lore_amount = event.get('lore_amount', 0)
-            lore_after = event.get('lore_after', 0)
+            lore_amount = event.get('additional_data', {}).get('lore_amount', 0)
+            lore_after = event.get('additional_data', {}).get('lore_after', 0)
             lore_message = StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
                 player=self.game_state.current_player,
@@ -397,6 +828,86 @@ class SteppedGameEngine(GameEngine):
                 result="Gained"
             )
             self.message_queue.append(lore_message)
+        
+        elif event_type == 'EFFECT_APPLIED':
+            # Queue effect application messages
+            target_name = event.get('target', 'Unknown')
+            effect_type = event.get('effect_type', 'unknown')
+            effect_value = event.get('effect_value', 0)
+            duration = event.get('duration', 'unknown')
+            source_ability = event.get('source_ability', 'Unknown')
+            
+            # Format message based on effect type
+            if effect_type == 'challenger_bonus':
+                duration_text = f" {duration}" if duration != "permanent" else ""
+                description = f"{target_name} gained Challenger +{effect_value}{duration_text}"
+            elif effect_type == 'strength_bonus':
+                duration_text = f" {duration}" if duration != "permanent" else ""
+                description = f"{target_name} gained +{effect_value} strength{duration_text}"
+            elif effect_type == 'willpower_bonus':
+                duration_text = f" {duration}" if duration != "permanent" else ""
+                description = f"{target_name} gained +{effect_value} willpower{duration_text}"
+            elif effect_type == 'lore_bonus':
+                duration_text = f" {duration}" if duration != "permanent" else ""
+                description = f"{target_name} gained +{effect_value} lore{duration_text}"
+            else:
+                description = f"{target_name} gained {effect_type} {effect_value}"
+            
+            effect_message = StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step_id=f"effect_applied",
+                description=description,
+                result="Effect Applied"
+            )
+            self.message_queue.append(effect_message)
+        
+        elif event_type == 'EFFECT_EXPIRED':
+            # Queue effect expiration messages
+            target_name = event.get('target', 'Unknown')
+            effect_type = event.get('effect_type', 'unknown')
+            effect_value = event.get('effect_value', 0)
+            reason = event.get('reason', 'unknown')
+            
+            # Format message based on effect type and reason
+            if effect_type == 'challenger_bonus':
+                reason_text = f" ({reason})" if reason != "unknown" else ""
+                description = f"{target_name} lost Challenger +{effect_value}{reason_text}"
+            elif effect_type == 'strength_bonus':
+                reason_text = f" ({reason})" if reason != "unknown" else ""
+                description = f"{target_name} lost +{effect_value} strength{reason_text}"
+            elif effect_type == 'willpower_bonus':
+                reason_text = f" ({reason})" if reason != "unknown" else ""
+                description = f"{target_name} lost +{effect_value} willpower{reason_text}"
+            elif effect_type == 'lore_bonus':
+                reason_text = f" ({reason})" if reason != "unknown" else ""
+                description = f"{target_name} lost +{effect_value} lore{reason_text}"
+            else:
+                description = f"{target_name} lost {effect_type} {effect_value}"
+            
+            effect_message = StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step_id=f"effect_expired",
+                description=description,
+                result="Effect Expired"
+            )
+            self.message_queue.append(effect_message)
+    
+    def _process_turn_end_effects(self) -> None:
+        """Process effect expiration at end of turn."""
+        # Get the player whose turn just ended (before the turn switch)
+        # Note: The turn has already switched, so we need the previous player
+        old_player_index = (self.game_state.current_player_index - 1) % len(self.game_state.players)
+        ending_player = self.game_state.players[old_player_index]
+        
+        # Clear temporary bonuses from all characters belonging to the ending player
+        for character in ending_player.characters_in_play:
+            expired_effects = character.clear_temporary_bonuses(self.game_state)
+            
+            # Queue messages for each expired effect
+            for effect in expired_effects:
+                self._queue_choice_event_message(effect)
     
     def _get_legal_actions(self) -> List[LegalAction]:
         """Get legal actions formatted for messages."""
@@ -864,3 +1375,125 @@ class SteppedGameEngine(GameEngine):
     def register_player_input_provider(self, player_id: str, provider) -> None:
         """Register an input provider for a player."""
         self.input_manager.register_input_provider(player_id, provider)
+    
+    # Conditional Effect Evaluation Methods
+    @property
+    def condition_evaluator(self):
+        """Get or create the condition evaluator instance."""
+        if self._condition_evaluator is None:
+            from ..models.abilities.composable.condition_evaluator import ConditionEvaluator
+            self._condition_evaluator = ConditionEvaluator()
+        return self._condition_evaluator
+    
+    def _evaluate_conditional_effects_after_move(self, move: GameMove) -> None:
+        """Evaluate conditional effects after a move is processed."""
+        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
+        
+        # Determine trigger type based on move
+        trigger = EvaluationTrigger.STEP_EXECUTED
+        if isinstance(move, PlayMove):
+            trigger = EvaluationTrigger.CARD_PLAYED
+        elif isinstance(move, PassMove):
+            # Check if this caused a phase or turn change
+            trigger = EvaluationTrigger.PHASE_CHANGE
+        
+        # Evaluate and queue any events
+        events = self.condition_evaluator.evaluate_all_conditions(self.game_state, trigger)
+        self._queue_conditional_effect_events(events)
+    
+    def _evaluate_conditional_effects_after_step(self) -> None:
+        """Evaluate conditional effects after a step is executed."""
+        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
+        
+        events = self.condition_evaluator.evaluate_all_conditions(
+            self.game_state, 
+            EvaluationTrigger.STEP_EXECUTED
+        )
+        self._queue_conditional_effect_events(events)
+    
+    def _evaluate_conditional_effects_on_turn_change(self) -> None:
+        """Evaluate conditional effects when turn changes."""
+        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
+        
+        events = self.condition_evaluator.evaluate_all_conditions(
+            self.game_state, 
+            EvaluationTrigger.TURN_CHANGE
+        )
+        self._queue_conditional_effect_events(events)
+    
+    def _evaluate_conditional_effects_on_phase_change(self) -> None:
+        """Evaluate conditional effects when phase changes."""
+        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
+        
+        events = self.condition_evaluator.evaluate_all_conditions(
+            self.game_state, 
+            EvaluationTrigger.PHASE_CHANGE
+        )
+        self._queue_conditional_effect_events(events)
+    
+    def _queue_conditional_effect_events(self, events: List[Dict]) -> None:
+        """Queue conditional effect events as messages."""
+        for event in events:
+            event_type = event.get('type')
+            
+            if event_type == 'CONDITIONAL_EFFECT_APPLIED':
+                from .game_event_types import GameEventType
+                
+                message = StepExecutedMessage(
+                    type=MessageType.STEP_EXECUTED,
+                    player=self.game_state.current_player,
+                    step_id=GameEventType.CONDITIONAL_EFFECT_APPLIED.value,
+                    description="",  # No description - let display layer handle it
+                    result="Applied"
+                )
+                # Store the raw event data for proper formatting
+                message.event_data = event
+                self.message_queue.append(message)
+                return  # Return early to avoid duplicating the message
+            
+            elif event_type == 'CONDITIONAL_EFFECT_REMOVED':
+                from .game_event_types import GameEventType
+                
+                message = StepExecutedMessage(
+                    type=MessageType.STEP_EXECUTED,
+                    player=self.game_state.current_player,
+                    step_id=GameEventType.CONDITIONAL_EFFECT_REMOVED.value,
+                    description="",  # No description - let display layer handle it
+                    result="Removed"
+                )
+                # Store the raw event data for proper formatting
+                message.event_data = event
+                self.message_queue.append(message)
+                return  # Return early to avoid duplicating the message
+            
+            else:
+                description = f"Conditional effect event: {event_type}"
+                
+                message = StepExecutedMessage(
+                    type=MessageType.STEP_EXECUTED,
+                    player=self.game_state.current_player,
+                    step_id=f"conditional_effect_{event_type.lower()}",
+                    description=description,
+                    result="Applied" if "APPLIED" in event_type else "Removed"
+                )
+                self.message_queue.append(message)
+    
+    def force_evaluate_conditional_effects(self) -> None:
+        """Force evaluation of all conditional effects."""
+        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
+        
+        events = self.condition_evaluator.evaluate_all_conditions(
+            self.game_state, 
+            EvaluationTrigger.FORCE_EVALUATE
+        )
+        self._queue_conditional_effect_events(events)
+    
+    def trigger_event_with_choices(self, event_context: EventContext) -> List[str]:
+        """Trigger an event with choice manager and action queue included in the context."""
+        # Add choice manager and action queue to the event context's additional data
+        if not event_context.additional_data:
+            event_context.additional_data = {}
+        event_context.additional_data['choice_manager'] = self.choice_manager
+        event_context.additional_data['action_queue'] = self.action_queue
+        
+        return self.event_manager.trigger_event(event_context)

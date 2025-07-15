@@ -16,9 +16,9 @@ class ActionCard(Card):
     @property
     def is_song(self) -> bool:
         """Check if this action is a song (has singer cost reduction)."""
-        # Check abilities for singer cost text
-        for ability in self.abilities:
-            if "sing this song" in ability.effect.lower():
+        # Check effects for singer cost text
+        for effect in self.effects:
+            if "sing this song" in effect.lower():
                 return True
         return False
     
@@ -28,9 +28,9 @@ class ActionCard(Card):
         if not self.is_song:
             return None
         
-        # Parse from ability text like "cost 2 or more can sing..."
-        for ability in self.abilities:
-            effect_text = ability.effect.lower()
+        # Parse from effect text like "cost 2 or more can sing..."
+        for effect in self.effects:
+            effect_text = effect.lower()
             if "cost" in effect_text and "sing" in effect_text:
                 # Try to extract the cost from text like "cost 2 or more"
                 words = effect_text.split()

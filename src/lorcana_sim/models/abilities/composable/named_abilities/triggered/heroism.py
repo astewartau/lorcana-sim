@@ -3,7 +3,7 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import BANISH_TARGET
+from ...effects import BanishCharacter
 from ...target_selectors import EVENT_TARGET
 from ...triggers import when_banished_in_challenge
 
@@ -19,5 +19,5 @@ def create_heroism(character: Any, ability_data: dict):
         character,
         when_banished_in_challenge(character),
         EVENT_TARGET,  # The character that was challenged
-        BANISH_TARGET
+        BanishCharacter()
     )

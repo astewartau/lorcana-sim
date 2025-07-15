@@ -27,6 +27,7 @@ class ChoiceOption:
     id: str                              # Unique identifier for this option
     description: str                     # Human-readable description
     effect: Effect                       # Effect to execute if chosen
+    target: Any = None                   # Target to apply effect to (overrides original trigger target)
     data: Dict[str, Any] = field(default_factory=dict)  # Additional data
 
 
@@ -245,6 +246,12 @@ class SelectCharacterChoice(Effect):
                 def apply(self, target, context):
                     return self.base_effect.apply(self.selected_char, context)
                 
+                def get_events(self, target, context, result):
+                    """Forward events from the base effect."""
+                    if hasattr(self.base_effect, 'get_events'):
+                        return self.base_effect.get_events(self.selected_char, context, result)
+                    return []
+                
                 def __str__(self):
                     return f"Apply to {self.selected_char.name}"
             
@@ -343,23 +350,13 @@ class SelectCardChoice(Effect):
             if hasattr(card, 'cost'):
                 card_name += f" ({card.cost} ink)"
             
-            # Create effect that applies the chosen effect to this specific card
-            class CardTargetEffect(Effect):
-                def __init__(self, selected_card, base_effect):
-                    self.selected_card = selected_card
-                    self.base_effect = base_effect
-                
-                def apply(self, target, context):
-                    return self.base_effect.apply(self.selected_card, context)
-                
-                def __str__(self):
-                    return f"Apply to {self.selected_card.name}"
-            
+            # Store the card directly as the target for this option
             options.append(ChoiceOption(
                 f"card_{i}",
                 card_name,
-                CardTargetEffect(card, self.effect_on_selected),
-                {"card": card}
+                self.effect_on_selected,  # Use original effect directly
+                target=card,              # Store card as target
+                data={"card": card}
             ))
         
         if not options:
@@ -443,20 +440,44 @@ class GameChoiceManager:
         
         # Find the selected option
         selected_effect = None
+        selected_target = None
         for option in self.current_choice.options:
             if option.id == selected_option:
                 selected_effect = option.effect
+                selected_target = option.target  # Use option's target if specified
                 break
         
         if selected_effect is None:
             return False
         
         # Execute the chosen effect
-        target = self.current_choice.trigger_context.get('_choice_target')
+        # Use option.target if specified, otherwise fall back to original trigger target
+        target = selected_target if selected_target is not None else self.current_choice.trigger_context.get('_choice_target')
         context = self.current_choice.trigger_context.get('_choice_execution_context', {})
         
         if target is not None:
-            selected_effect.apply(target, context)
+            # Check if we have an ActionQueue available in the context
+            action_queue = context.get('action_queue')
+            if action_queue and hasattr(action_queue, 'enqueue'):
+                # Use ActionQueue for atomic execution
+                from .action_queue import ActionPriority
+                action_queue.enqueue(
+                    selected_effect,
+                    target,
+                    context,
+                    ActionPriority.HIGH,  # Choice-selected effects should run with high priority
+                    f"Choice: {self.current_choice.ability_name}"
+                )
+            else:
+                # Fallback to direct execution
+                result = selected_effect.apply(target, context)
+                
+                # Collect events from the effect and add to choice_events
+                game_state = context.get('game_state')
+                if game_state and hasattr(game_state, 'choice_events'):
+                    if hasattr(selected_effect, 'get_events'):
+                        events = selected_effect.get_events(target, context, result)
+                        game_state.choice_events.extend(events)
         
         # Store the result
         self.choice_results[choice_id] = {

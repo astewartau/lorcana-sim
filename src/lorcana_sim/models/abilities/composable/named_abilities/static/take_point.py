@@ -59,7 +59,7 @@ class TakePointPassiveAbility:
             event_manager.passive_abilities.remove(self)
     
     def get_relevant_events(self):
-        """Return events this passive ability cares about for compatibility."""
+        """Return events this passive ability cares about."""
         # Passive abilities don't need specific events since they're evaluated after all events
         return []
     

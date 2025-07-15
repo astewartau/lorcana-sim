@@ -3,7 +3,7 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import CostReductionEffect
+from ...effects import CostModification
 from ...target_selectors import SELF
 from ...triggers import when_character_name_enters_play, when_character_name_leaves_play, or_conditions
 
@@ -40,8 +40,5 @@ def create_loyal(character: Any, ability_data: dict):
             when_character_name_leaves_play("Gaston", character.controller)
         ),
         SELF,
-        CostReductionEffect(
-            amount=1,
-            condition_func=_loyal_condition
-        )
+        CostModification(cost_change=-1)
     )

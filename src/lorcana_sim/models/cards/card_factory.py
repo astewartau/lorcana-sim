@@ -65,7 +65,6 @@ class CardFactory:
             "set_code": card_data["setCode"],
             "number": card_data["number"],
             "story": card_data["story"],
-            "abilities": CardFactory._parse_abilities(card_data),
             "flavor_text": card_data.get("flavorText"),
             "full_text": card_data.get("fullText", ""),
             "artists": card_data.get("artists", [])
@@ -109,15 +108,6 @@ class CardFactory:
             "lore": card_data.get("lore")  # Can be None
         }
     
-    @staticmethod
-    def _parse_abilities(card_data: Dict[str, Any]) -> List:
-        """Parse abilities from card data.
-        
-        Returns empty list for now - composable abilities are added separately.
-        """
-        # Composable abilities are now added via keyword parsing
-        # and ability text parsing in a separate system
-        return []
     
     @staticmethod
     def create_cards_from_database(database: List[Dict[str, Any]]) -> List[Card]:

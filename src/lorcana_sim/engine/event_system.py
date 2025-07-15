@@ -40,6 +40,7 @@ class GameEvent(Enum):
     
     # Resource events
     CARD_DRAWN = "card_drawn"
+    CARD_DISCARDED = "card_discarded"
     INK_PLAYED = "ink_played"
     LORE_GAINED = "lore_gained"
     
@@ -59,8 +60,33 @@ class GameEvent(Enum):
     CHARACTER_EXERTS = "character_exerts"
     CHARACTER_MOVES_TO_LOCATION = "character_moves_to_location"
     ABILITY_ACTIVATED = "ability_activated"
+    ABILITY_TRIGGERED = "ability_triggered"
     DECK_MANIPULATED = "deck_manipulated"
     CARD_REVEALED = "card_revealed"
+    EFFECT_APPLIED = "effect_applied"
+    EFFECT_EXPIRED = "effect_expired"
+    
+    # New effect-specific events
+    STAT_MODIFIED = "stat_modified"
+    CHARACTER_EXERTED = "character_exerted"
+    EFFECT_PREVENTED = "effect_prevented"
+    DAMAGE_MODIFIED = "damage_modified"
+    TARGET_CHANGED = "target_changed"
+    PROPERTY_GRANTED = "property_granted"
+    SHIFT_ACTIVATED = "shift_activated"
+    CHALLENGER_ACTIVATED = "challenger_activated"
+    CHARACTER_VANISHED = "character_vanished"
+    RECKLESS_ACTIVATED = "reckless_activated"
+    SING_TOGETHER_ACTIVATED = "sing_together_activated"
+    BODYGUARD_ACTIVATED = "bodyguard_activated"
+    SUPPORT_ACTIVATED = "support_activated"
+    COST_MODIFIED = "cost_modified"
+    PLAYED_FROM_DISCARD = "played_from_discard"
+    LIBRARY_SEARCHED = "library_searched"
+    SINGING_PREVENTED = "singing_prevented"
+    SINGING_COST_MODIFIED = "singing_cost_modified"
+    DAMAGE_REMOVED = "damage_removed"
+    DECK_LOOKED_AT = "deck_looked_at"
 
 
 @dataclass
@@ -108,7 +134,10 @@ class GameEventManager:
                 
             # If no relevant events found, the ability doesn't need event registration
             if not relevant_events:
+                print(f"DEBUG: No relevant events for ability {ability.name}, listeners: {len(ability.listeners)}")
                 return
+            
+            print(f"DEBUG: Registering ability {ability.name} for events: {relevant_events}")
         else:
             # For non-composable abilities, they must implement get_relevant_events() method
             if hasattr(ability, 'get_relevant_events'):

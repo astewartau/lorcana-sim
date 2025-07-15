@@ -454,3 +454,8 @@ def when_moves_to_location(character: Any) -> Callable[[EventContext], bool]:
     """Trigger when a character moves to a location."""
     return when_event(GameEvent.CHARACTER_MOVES_TO_LOCATION,
                      source_filter=lambda src, ctx: src == character)
+
+
+def always_active() -> Callable[[EventContext], bool]:
+    """Trigger that is always active (for placeholder abilities)."""
+    return lambda ctx: False  # Never actually triggers

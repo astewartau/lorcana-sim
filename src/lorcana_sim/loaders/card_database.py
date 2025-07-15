@@ -146,7 +146,6 @@ class CardDatabase:
                 set_code=card_data.set_code,
                 number=card_data.number,
                 story=card_data.story,
-                abilities=[],  # We'll handle abilities separately
                 strength=card_data.strength if card_data.strength is not None else 1,
                 willpower=card_data.willpower if card_data.willpower is not None else 1,
                 lore=card_data.lore if card_data.lore is not None else 1,
@@ -185,7 +184,6 @@ class CardDatabase:
                 set_code=card_data.set_code,
                 number=card_data.number,
                 story=card_data.story,
-                abilities=abilities
             )
         
         else:  # Item or other
@@ -201,7 +199,6 @@ class CardDatabase:
                 set_code=card_data.set_code,
                 number=card_data.number,
                 story=card_data.story,
-                abilities=[]
             )
     
     def _create_composable_abilities(self, character, abilities_data: List[dict]) -> List:

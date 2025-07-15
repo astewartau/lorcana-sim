@@ -3,7 +3,7 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import GAIN_CHALLENGER_BUFF
+from ...effects import ChallengerEffect
 from ...target_selectors import CONTROLLER
 from ...triggers import when_enters_play
 from ......engine.choice_system import choose_character_effect
@@ -19,7 +19,7 @@ def create_thats_better(character: Any, ability_data: dict):
     choice_effect = choose_character_effect(
         prompt="Choose a character to gain Challenger +2 this turn",
         character_filter=lambda char: True,  # Any friendly character
-        effect_on_selected=GAIN_CHALLENGER_BUFF(2, "turn"),
+        effect_on_selected=ChallengerEffect(2),
         ability_name="THAT'S BETTER",
         allow_none=False,  # Must choose a character
         from_play=True,

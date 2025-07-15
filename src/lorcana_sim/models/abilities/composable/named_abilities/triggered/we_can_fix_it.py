@@ -4,7 +4,7 @@ They can't quest for the rest of this turn."""
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import ReadyCharactersEffect
+from ...effects import ReadyCharacter
 from ...target_selectors import CharacterSelector, friendly_filter, subtype_filter, and_filters
 from ...triggers import when_quests
 
@@ -30,5 +30,5 @@ def create_we_can_fix_it(character: Any, ability_data: dict):
                 not_this_character_filter
             )
         ),
-        ReadyCharactersEffect()
+        ReadyCharacter()
     )

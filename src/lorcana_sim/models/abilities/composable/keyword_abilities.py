@@ -4,7 +4,7 @@ from typing import Any
 from .composable_ability import ComposableAbility, quick_ability
 from .effects import (
     StatModification, PreventEffect, ModifyDamage, ForceRetarget, 
-    ModifySongCost, GrantProperty, NoEffect, ConditionalEffect,
+    GrantProperty, NoEffect, ConditionalEffect,
     ShiftEffect, ChallengerEffect, VanishEffect, RecklessEffect,
     SingTogetherEffect, CostModification, ExertCharacter, ReadyCharacter,
     BodyguardEffect, SupportStrengthEffect
@@ -434,68 +434,5 @@ def create_scaling_ability_example(character: Any) -> ComposableAbility:
     )
 
 
-# =============================================================================
-# COMPATIBILITY ADAPTER FOR EXISTING KEYWORD REGISTRY
-# =============================================================================
-
-class ComposableKeywordRegistry:
-    """Registry that creates composable versions of keyword abilities."""
-    
-    @staticmethod
-    def create_keyword_ability(keyword: str, value: int = None) -> Any:
-        """Create a keyword ability factory function."""
-        def factory(character):
-            return create_keyword_ability(keyword, character, value)
-        return factory
-    
-    @staticmethod
-    def get_available_keywords() -> list[str]:
-        """Get list of available keyword names."""
-        return [
-            'Resist', 'Ward', 'Bodyguard', 'Evasive', 'Singer', 'Support', 'Rush',
-            'Shift', 'Puppy Shift', 'Universal Shift', 'Challenger', 'Reckless', 
-            'Vanish', 'Sing Together'
-        ]
 
 
-# =============================================================================
-# BULK CONVERSION UTILITIES
-# =============================================================================
-
-def convert_all_character_abilities(character: Any) -> list[ComposableAbility]:
-    """Convert all of a character's existing abilities to composable format."""
-    composable_abilities = []
-    
-    if not hasattr(character, 'abilities'):
-        return composable_abilities
-    
-    for ability in character.abilities:
-        if hasattr(ability, 'name'):
-            # Try to convert known keyword abilities
-            ability_name = ability.name
-            value = getattr(ability, 'value', None)
-            
-            try:
-                composable = create_keyword_ability(ability_name, character, value)
-                composable_abilities.append(composable)
-            except ValueError:
-                # Unknown ability, skip for now
-                # In a full implementation, we'd have more conversion logic
-                pass
-    
-    return composable_abilities
-
-
-def register_composable_abilities_with_character(character: Any, event_manager: Any = None):
-    """Convert a character's abilities to composable format and register them."""
-    composable_abilities = convert_all_character_abilities(character)
-    
-    # Replace the character's abilities with composable versions
-    character.composable_abilities = composable_abilities
-    
-    # Register with event manager if provided
-    if event_manager:
-        for ability in composable_abilities:
-            ability.register_with_event_manager(event_manager)
-    
-    return composable_abilities

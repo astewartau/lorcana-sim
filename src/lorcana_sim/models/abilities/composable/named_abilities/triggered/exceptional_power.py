@@ -3,7 +3,7 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import EXERT_ALL_OPPOSING_CHARACTERS
+from ...effects import ExertCharacter
 from ...target_selectors import ALL_OPPONENTS
 from ...triggers import when_enters_play
 
@@ -19,5 +19,5 @@ def create_exceptional_power(character: Any, ability_data: dict):
         character,
         when_enters_play(character),
         ALL_OPPONENTS,
-        EXERT_ALL_OPPOSING_CHARACTERS
+        ExertCharacter()
     )

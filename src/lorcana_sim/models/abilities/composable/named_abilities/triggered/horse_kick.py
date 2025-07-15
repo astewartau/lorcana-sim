@@ -3,7 +3,7 @@
 from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
-from ...effects import TEMP_STRENGTH_MINUS_2
+from ...effects import StatModification
 from ...target_selectors import CharacterSelector
 from ...triggers import when_enters_play
 
@@ -19,5 +19,5 @@ def create_horse_kick(character: Any, ability_data: dict):
         character,
         when_enters_play(character),
         CharacterSelector(),  # Any character can be chosen
-        TEMP_STRENGTH_MINUS_2
+        StatModification("strength", -2, "this_turn")
     )

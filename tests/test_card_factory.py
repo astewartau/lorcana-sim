@@ -7,7 +7,6 @@ from lorcana_sim.models.cards.character_card import CharacterCard
 from lorcana_sim.models.cards.action_card import ActionCard
 from lorcana_sim.models.cards.item_card import ItemCard
 from lorcana_sim.models.cards.location_card import LocationCard
-# Old ability system removed - abilities now handled by new framework
 
 
 def test_create_character_from_json():
@@ -64,8 +63,6 @@ def test_create_character_from_json():
     assert card.flavor_text == "Even the smallest mouse can be a giant."
     assert card.artists == ["Artist Name"]
     
-    # Check abilities - now returns empty list with new framework stub
-    assert len(card.abilities) == 0
 
 
 def test_create_action_from_json():
@@ -299,5 +296,4 @@ def test_create_cards_from_database():
     assert cards[0].name == "Card 1"
     assert cards[1].name == "Card 2"
 
-# Removed keyword ability tests - old ability system removed
 
