@@ -30,7 +30,6 @@ def create_test_character(name: str, cost: int = 3, strength: int = 2, willpower
         strength=strength,
         willpower=willpower,
         lore=lore,
-        abilities=[]
     )
 
 
@@ -50,7 +49,6 @@ def create_test_song(cost: int, singer_cost: int, name: str = "Test Song") -> Ac
         set_code="TEST",
         number=1,
         story="Test",
-        abilities=[]
     )
     return song
 

@@ -23,7 +23,6 @@ def create_test_character(name: str, cost: int = 3, strength: int = 2, willpower
         set_code="TEST",
         number=1,
         story="Test",
-        abilities=[],
         strength=strength,
         willpower=willpower,
         lore=lore,

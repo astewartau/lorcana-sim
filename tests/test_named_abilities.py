@@ -56,8 +56,11 @@ class TestStaticNamedAbilities:
         ability_data = {"name": "SINISTER PLOT", "type": "static"}
         sinister_plot_ability = NamedAbilityRegistry.create_ability("SINISTER PLOT", character, ability_data)
         
-        assert sinister_plot_ability is not None
-        assert sinister_plot_ability.name == "SINISTER PLOT"
+        # SINISTER PLOT returns None but adds conditional effects to the character
+        assert sinister_plot_ability is None
+        assert len(character.conditional_effects) > 0
+        assert any("sinister_plot" in effect.effect_id for effect in character.conditional_effects)
+        assert f'sinister_plot_cost_modifier' in character.metadata
     
     def test_loyal_ability(self):
         """Test LOYAL - If you have a character named Gaston in play, you pay 1 ⬢ less to play this character."""
@@ -68,8 +71,11 @@ class TestStaticNamedAbilities:
         ability_data = {"name": "LOYAL", "type": "static"}
         loyal_ability = NamedAbilityRegistry.create_ability("LOYAL", character, ability_data)
         
-        assert loyal_ability is not None
-        assert loyal_ability.name == "LOYAL"
+        # LOYAL returns None but adds conditional effects to the character
+        assert loyal_ability is None
+        assert len(character.conditional_effects) > 0
+        assert any("loyal" in effect.effect_id for effect in character.conditional_effects)
+        assert f'loyal_cost_modifier' in character.metadata
 
 
 class TestTriggeredNamedAbilities:

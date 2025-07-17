@@ -32,7 +32,6 @@ def mock_character():
         set_code="TEST",
         number=1,
         story="Test Story",
-        abilities=[],
         strength=2,
         willpower=3,
         lore=1,
@@ -54,8 +53,7 @@ def mock_action():
         rarity=Rarity.COMMON,
         set_code="TEST",
         number=2,
-        story="Test Story",
-        abilities=[]
+        story="Test Story"
     )
 
 
@@ -73,8 +71,7 @@ def mock_item():
         rarity=Rarity.COMMON,
         set_code="TEST",
         number=3,
-        story="Test Story",
-        abilities=[]
+        story="Test Story"
     )
 
 
@@ -336,7 +333,7 @@ class TestPlayer:
         non_inkable = CharacterCard(
             id=99, name="Non-Inkable", version=None, full_name="Non-Inkable",
             cost=1, color=CardColor.AMBER, inkwell=False, rarity=Rarity.COMMON,
-            set_code="TEST", number=99, story="Test", abilities=[]
+            set_code="TEST", number=99, story="Test"
         )
         player.hand = [non_inkable]
         result = player.play_ink(non_inkable)
@@ -376,13 +373,13 @@ class TestPlayer:
         ready_char = CharacterCard(
             id=1, name="Ready", version=None, full_name="Ready",
             cost=1, color=CardColor.AMBER, inkwell=True, rarity=Rarity.COMMON,
-            set_code="TEST", number=1, story="Test", abilities=[]
+            set_code="TEST", number=1, story="Test"
         )
         
         exerted_char = CharacterCard(
             id=2, name="Exerted", version=None, full_name="Exerted", 
             cost=1, color=CardColor.AMBER, inkwell=True, rarity=Rarity.COMMON,
-            set_code="TEST", number=2, story="Test", abilities=[]
+            set_code="TEST", number=2, story="Test"
         )
         exerted_char.exerted = True
         
