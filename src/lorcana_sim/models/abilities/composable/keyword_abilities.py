@@ -7,7 +7,7 @@ from .effects import (
     GrantProperty, NoEffect, ConditionalEffect,
     ShiftEffect, ChallengerEffect, VanishEffect, RecklessEffect,
     SingTogetherEffect, CostModification, ExertCharacter, ReadyCharacter,
-    BodyguardEffect, SupportStrengthEffect
+    BodyguardEffect, SupportStrengthEffect, ModifySongCost
 )
 from .target_selectors import (
     SELF, NO_TARGET, EVENT_TARGET, EVENT_SOURCE, FRIENDLY_CHARACTER, OTHER_FRIENDLY, ENEMY_CHARACTER,
