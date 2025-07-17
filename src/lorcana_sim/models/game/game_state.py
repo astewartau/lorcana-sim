@@ -167,13 +167,13 @@ class GameState:
     
     def advance_phase(self) -> None:
         """Advance to the next phase."""
-        if self.current_phase.value == 'ready':
+        if self.current_phase == Phase.READY:
             self.current_phase = Phase.SET
-        elif self.current_phase.value == 'set':
+        elif self.current_phase == Phase.SET:
             self.current_phase = Phase.DRAW
-        elif self.current_phase.value == 'draw':
+        elif self.current_phase == Phase.DRAW:
             self.current_phase = Phase.PLAY
-        elif self.current_phase.value == 'play':
+        elif self.current_phase == Phase.PLAY:
             # End turn, move to next player
             self.end_turn()
     
@@ -259,23 +259,6 @@ class GameState:
         
         return readied_items
     
-    def set_last_event(self, event_type: str, **event_data) -> None:
-        """Set the last event that occurred for inspection."""
-        self.last_event = {
-            'type': event_type,
-            'turn': self.turn_number,
-            'phase': self.current_phase.value,
-            'timestamp': len(self.actions_this_turn),  # Simple event ordering
-            **event_data
-        }
-    
-    def get_last_event(self) -> Optional[Dict[str, Any]]:
-        """Get the last event that occurred."""
-        return self.last_event
-    
-    def clear_last_event(self) -> None:
-        """Clear the last event."""
-        self.last_event = None
     
     def set_step(self) -> None:
         """Execute the set step (resolve start-of-turn effects)."""
@@ -400,7 +383,7 @@ class GameState:
     
     def can_play_ink(self) -> bool:
         """Check if current player can play ink."""
-        return not self.ink_played_this_turn and self.current_phase.value == 'play'
+        return not self.ink_played_this_turn and self.current_phase == Phase.PLAY
     
     def has_character_acted_this_turn(self, character_id: int) -> bool:
         """Check if a character has already acted this turn."""
@@ -417,8 +400,7 @@ class GameState:
         if self.is_game_over():
             return False
         
-        # Use value comparison to avoid enum identity issues
-        if self.current_phase.value == 'play':
+        if self.current_phase == Phase.PLAY:
             return action in [
                 GameAction.PLAY_INK,
                 GameAction.PLAY_CHARACTER,
@@ -431,7 +413,7 @@ class GameState:
                 GameAction.PROGRESS,
                 GameAction.PASS_TURN
             ]
-        elif self.current_phase.value in ['ready', 'set', 'draw']:
+        elif self.current_phase in [Phase.READY, Phase.SET, Phase.DRAW]:
             return action in [GameAction.PROGRESS, GameAction.PASS_TURN]
         
         return False
@@ -444,16 +426,6 @@ class GameState:
             # Reset pass counter on any meaningful action
             self.consecutive_passes = 0
     
-    def _update_character_dry_status(self) -> None:
-        """Update dry status for all characters based on current turn."""
-        for player in self.players:
-            for char in player.characters_in_play:
-                if char.turn_played is not None:
-                    # Ink dries at start of owner's next turn
-                    char.is_dry = self.turn_number > char.turn_played
-                else:
-                    # Character wasn't played this game (already dry)
-                    char.is_dry = True
     
     def _update_character_dry_status_except_current(self) -> None:
         """Update dry status for all characters except current player (they update during ready phase)."""
@@ -461,13 +433,7 @@ class GameState:
         for player in self.players:
             if player != current_player:
                 for char in player.characters_in_play:
-                    if char.turn_played is not None:
-                        # Ink dries at start of owner's next turn, not just any turn
-                        # Only update if this character belongs to a player whose turn just started
-                        # Since this is called during end_turn, we should NOT update dry status here
-                        # Dry status updates only happen during the character owner's ready phase
-                        pass
-                    else:
+                    if char.turn_played is None:
                         # Character wasn't played this game (already dry)
                         char.is_dry = True
     
