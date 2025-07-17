@@ -1,115 +1,67 @@
 """Integration tests for CLEAR THE PATH - Characters with cost 2 or less cost 1 ⬢ less to play for each opposing character that is exerted."""
 
 import pytest
-from src.lorcana_sim.models.game.game_state import GameState
-from src.lorcana_sim.models.game.player import Player
-from src.lorcana_sim.models.cards.character_card import CharacterCard
 from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-from src.lorcana_sim.models.abilities.composable.named_abilities import NamedAbilityRegistry
-from src.lorcana_sim.engine.event_system import GameEventManager, GameEvent, EventContext
+from src.lorcana_sim.engine.event_system import GameEvent, EventContext
+from tests.helpers import BaseNamedAbilityTest, create_test_character, add_named_ability
 
 
-class TestClearThePathIntegration:
+class TestClearThePathIntegration(BaseNamedAbilityTest):
     """Integration tests for CLEAR THE PATH named ability."""
-    
-    def setup_method(self):
-        """Set up test environment with players and game state."""
-        self.player1 = Player("Player 1")
-        self.player2 = Player("Player 2")
-        self.game_state = GameState([self.player1, self.player2])
-        self.event_manager = GameEventManager(self.game_state)
-        self.game_state.event_manager = self.event_manager
     
     def create_clear_the_path_character(self, name="Flynn Rider - His Own Hero"):
         """Create a character with CLEAR THE PATH ability."""
-        character = CharacterCard(
-            id=1,
-            name=name.split(" - ")[0],
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=4,
             color=CardColor.AMBER,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=1,
-            story="Test",
-            abilities=[],
             strength=3,
             willpower=4,
-            lore=2
+            lore=2,
+            rarity=Rarity.RARE
         )
         
-        # Add CLEAR THE PATH ability
-        ability_data = {"name": "CLEAR THE PATH", "type": "static"}
-        clear_the_path_ability = NamedAbilityRegistry.create_ability("CLEAR THE PATH", character, ability_data)
-        character.composable_abilities = [clear_the_path_ability]
-        character.register_composable_abilities(self.event_manager)
-        
+        add_named_ability(character, "CLEAR THE PATH", "static", self.event_manager)
         return character
     
     def create_low_cost_character(self, cost=2, name="Low Cost Character", exerted=False):
         """Create a low-cost character for testing cost reduction."""
-        character = CharacterCard(
-            id=2,
+        character = create_test_character(
             name=name,
-            version="Test",
-            full_name=f"{name} - Test",
             cost=cost,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=2,
-            story="Test",
-            abilities=[],
             strength=cost,
             willpower=cost,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
         character.exerted = exerted
         return character
     
     def create_high_cost_character(self, cost=4, name="High Cost Character", exerted=False):
         """Create a high-cost character that shouldn't benefit."""
-        character = CharacterCard(
-            id=3,
+        character = create_test_character(
             name=name,
-            version="Test",
-            full_name=f"{name} - Test",
             cost=cost,
             color=CardColor.SAPPHIRE,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=3,
-            story="Test",
-            abilities=[],
             strength=cost,
             willpower=cost,
-            lore=2
+            lore=2,
+            rarity=Rarity.RARE
         )
         character.exerted = exerted
         return character
     
     def create_opponent_character(self, name="Opponent Character", exerted=False):
         """Create an opponent character."""
-        character = CharacterCard(
-            id=4,
+        character = create_test_character(
             name=name,
-            version="Test",
-            full_name=f"{name} - Test",
             cost=3,
             color=CardColor.EMERALD,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=4,
-            story="Test",
-            abilities=[],
             strength=2,
             willpower=3,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
         character.exerted = exerted
         return character

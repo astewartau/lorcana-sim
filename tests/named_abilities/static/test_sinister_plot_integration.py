@@ -1,113 +1,61 @@
 """Integration tests for SINISTER PLOT - Characters with cost 5 or more can't ↷ to sing songs."""
 
 import pytest
-from src.lorcana_sim.models.game.game_state import GameState
-from src.lorcana_sim.models.game.player import Player
-from src.lorcana_sim.models.cards.character_card import CharacterCard
-from src.lorcana_sim.models.cards.action_card import ActionCard
 from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-from src.lorcana_sim.models.abilities.composable.named_abilities import NamedAbilityRegistry
-from src.lorcana_sim.engine.event_system import GameEventManager
+from tests.helpers import BaseNamedAbilityTest, create_test_character, add_named_ability, create_test_action_card, add_singer_ability
 
 
-class TestSinisterPlotIntegration:
+class TestSinisterPlotIntegration(BaseNamedAbilityTest):
     """Integration tests for SINISTER PLOT named ability."""
-    
-    def setup_method(self):
-        """Set up test environment with players and game state."""
-        self.player1 = Player("Player 1")
-        self.player2 = Player("Player 2")
-        self.game_state = GameState([self.player1, self.player2])
-        self.event_manager = GameEventManager(self.game_state)
-        self.game_state.event_manager = self.event_manager
     
     def create_sinister_plot_character(self, name="Hades - Lord of the Underworld"):
         """Create a character with SINISTER PLOT ability."""
-        character = CharacterCard(
-            id=1,
-            name=name.split(" - ")[0],
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=6,
             color=CardColor.AMETHYST,
-            inkwell=True,
-            rarity=Rarity.LEGENDARY,
-            set_code="1",
-            number=1,
-            story="Test",
-            abilities=[],
             strength=6,
             willpower=7,
-            lore=2
+            lore=2,
+            rarity=Rarity.LEGENDARY
         )
         
-        # Add SINISTER PLOT ability
-        ability_data = {"name": "SINISTER PLOT", "type": "static"}
-        sinister_plot_ability = NamedAbilityRegistry.create_ability("SINISTER PLOT", character, ability_data)
-        character.composable_abilities = [sinister_plot_ability]
-        character.register_composable_abilities(self.event_manager)
-        
+        add_named_ability(character, "SINISTER PLOT", "static", self.event_manager)
         return character
     
     def create_high_cost_character(self, cost=5, name="Expensive Character"):
         """Create a high-cost character for testing."""
-        character = CharacterCard(
-            id=2,
-            name=name,
-            version="Test",
-            full_name=f"{name} - Test",
+        return create_test_character(
+            name=f"{name} - Test",
             cost=cost,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=2,
-            story="Test",
-            abilities=[],
             strength=cost,
             willpower=cost,
-            lore=2
+            lore=2,
+            rarity=Rarity.RARE
         )
-        return character
     
     def create_low_cost_character(self, cost=3, name="Cheap Character"):
         """Create a low-cost character for testing."""
-        character = CharacterCard(
-            id=3,
-            name=name,
-            version="Test",
-            full_name=f"{name} - Test",
+        return create_test_character(
+            name=f"{name} - Test",
             cost=cost,
             color=CardColor.SAPPHIRE,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=3,
-            story="Test",
-            abilities=[],
             strength=cost,
             willpower=cost,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
-        return character
     
     def create_song_card(self, name="A Whole New World", cost=4):
         """Create a song card for testing."""
-        song = ActionCard(
-            id=4,
+        return create_test_action_card(
             name=name,
-            version="",
-            full_name=name,
             cost=cost,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=4,
-            story="Test",
-            abilities=[]
+            card_type="Song",
+            rarity=Rarity.COMMON
         )
-        return song
     
     def test_sinister_plot_prevents_high_cost_singing(self):
         """Test that SINISTER PLOT prevents characters with cost 5+ from singing."""
@@ -192,16 +140,12 @@ class TestSinisterPlotIntegration:
     
     def test_sinister_plot_with_singer_ability(self):
         """Test SINISTER PLOT interaction with Singer ability."""
-        from src.lorcana_sim.models.abilities.composable.keyword_abilities import create_singer_ability
-        
         sinister_plot_char = self.create_sinister_plot_character()
         high_cost_singer = self.create_high_cost_character(cost=6, name="High Cost Singer")
         song = self.create_song_card(cost=6)
         
         # Add Singer ability to high-cost character
-        singer_ability = create_singer_ability(6, high_cost_singer)
-        high_cost_singer.composable_abilities = [singer_ability]
-        high_cost_singer.register_composable_abilities(self.event_manager)
+        add_singer_ability(high_cost_singer, 6, self.event_manager)
         
         self.player1.characters_in_play.extend([sinister_plot_char, high_cost_singer])
         self.player1.hand.append(song)

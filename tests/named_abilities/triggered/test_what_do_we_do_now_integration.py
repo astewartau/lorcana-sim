@@ -1,93 +1,57 @@
 """Integration tests for WHAT DO WE DO NOW? - When you play this character, if you have a character named Anna in play, gain 2 lore."""
 
 import pytest
-from src.lorcana_sim.models.game.game_state import GameState
-from src.lorcana_sim.models.game.player import Player
-from src.lorcana_sim.models.cards.character_card import CharacterCard
 from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-from src.lorcana_sim.models.abilities.composable.named_abilities import NamedAbilityRegistry
-from src.lorcana_sim.engine.event_system import GameEventManager, GameEvent, EventContext
+from src.lorcana_sim.engine.event_system import GameEvent, EventContext
+from tests.helpers import BaseNamedAbilityTest, create_test_character, add_named_ability
 
 
-class TestWhatDoWeDoNowIntegration:
+class TestWhatDoWeDoNowIntegration(BaseNamedAbilityTest):
     """Integration tests for WHAT DO WE DO NOW? named ability."""
-    
-    def setup_method(self):
-        """Set up test environment with players and game state."""
-        self.player1 = Player("Player 1")
-        self.player2 = Player("Player 2")
-        self.game_state = GameState([self.player1, self.player2])
-        self.event_manager = GameEventManager(self.game_state)
-        self.game_state.event_manager = self.event_manager
     
     def create_what_do_we_do_now_character(self, name="Elsa - Snow Queen"):
         """Create a character with WHAT DO WE DO NOW? ability."""
-        character = CharacterCard(
-            id=1,
-            name=name.split(" - ")[0],
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=8,
             color=CardColor.AMETHYST,
-            inkwell=True,
-            rarity=Rarity.LEGENDARY,
-            set_code="1",
-            number=1,
-            story="Test",
-            abilities=[],
             strength=4,
             willpower=8,
-            lore=3
+            lore=3,
+            rarity=Rarity.LEGENDARY
         )
         
-        # Add WHAT DO WE DO NOW? ability
-        ability_data = {"name": "WHAT DO WE DO NOW?", "type": "triggered"}
-        what_do_we_do_now_ability = NamedAbilityRegistry.create_ability("WHAT DO WE DO NOW?", character, ability_data)
-        character.composable_abilities = [what_do_we_do_now_ability]
-        character.register_composable_abilities(self.event_manager)
-        
+        add_named_ability(character, "WHAT DO WE DO NOW?", "triggered", self.event_manager)
         return character
     
     def create_anna_character(self, name="Anna - Heir to Arendelle"):
         """Create an Anna character for the condition."""
-        character = CharacterCard(
-            id=2,
-            name="Anna",
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=5,
             color=CardColor.AMETHYST,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=2,
-            story="Test",
-            abilities=[],
             strength=3,
             willpower=5,
-            lore=2
+            lore=2,
+            rarity=Rarity.RARE
         )
+        # Override the name to be "Anna" as required by the ability
+        character.name = "Anna"
         return character
     
     def create_non_anna_character(self, name="Kristoff - Official Ice Master"):
         """Create a non-Anna character for comparison."""
-        character = CharacterCard(
-            id=3,
-            name="Kristoff",
-            version="Official Ice Master",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=4,
             color=CardColor.AMBER,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=3,
-            story="Test",
-            abilities=[],
             strength=4,
             willpower=4,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
+        # Override the name to be "Kristoff" as required for testing
+        character.name = "Kristoff"
         return character
     
     def test_what_do_we_do_now_triggers_with_anna_in_play(self):

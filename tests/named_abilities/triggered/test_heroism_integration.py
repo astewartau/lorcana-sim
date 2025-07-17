@@ -1,94 +1,52 @@
 """Integration tests for HEROISM - When you play this character, chosen opposing character gets -2 ◆ this turn."""
 
 import pytest
-from src.lorcana_sim.models.game.game_state import GameState
-from src.lorcana_sim.models.game.player import Player
-from src.lorcana_sim.models.cards.character_card import CharacterCard
 from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-from src.lorcana_sim.models.abilities.composable.named_abilities import NamedAbilityRegistry
-from src.lorcana_sim.engine.event_system import GameEventManager, GameEvent, EventContext
+from src.lorcana_sim.engine.event_system import GameEvent, EventContext
+from tests.helpers import BaseNamedAbilityTest, create_test_character, add_named_ability
 
 
-class TestHeroismIntegration:
+class TestHeroismIntegration(BaseNamedAbilityTest):
     """Integration tests for HEROISM named ability."""
-    
-    def setup_method(self):
-        """Set up test environment with players and game state."""
-        self.player1 = Player("Player 1")
-        self.player2 = Player("Player 2")
-        self.game_state = GameState([self.player1, self.player2])
-        self.event_manager = GameEventManager(self.game_state)
-        self.game_state.event_manager = self.event_manager
     
     def create_heroism_character(self, name="Hercules - True Hero"):
         """Create a character with HEROISM ability."""
-        character = CharacterCard(
-            id=1,
-            name=name.split(" - ")[0],
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=5,
             color=CardColor.AMBER,
-            inkwell=True,
-            rarity=Rarity.LEGENDARY,
-            set_code="1",
-            number=1,
-            story="Test",
-            abilities=[],
             strength=4,
             willpower=5,
-            lore=2
+            lore=2,
+            rarity=Rarity.LEGENDARY
         )
         
-        # Add HEROISM ability
-        ability_data = {"name": "HEROISM", "type": "triggered"}
-        heroism_ability = NamedAbilityRegistry.create_ability("HEROISM", character, ability_data)
-        character.composable_abilities = [heroism_ability]
-        character.register_composable_abilities(self.event_manager)
-        
+        add_named_ability(character, "HEROISM", "triggered", self.event_manager)
         return character
     
     def create_opponent_character(self, name="Villain Character", strength=3):
         """Create an opponent character to target with HEROISM."""
-        character = CharacterCard(
-            id=2,
-            name=name,
-            version="Test",
-            full_name=f"{name} - Test",
+        return create_test_character(
+            name=f"{name} - Test",
             cost=4,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=2,
-            story="Test",
-            abilities=[],
             strength=strength,
             willpower=4,
-            lore=1
+            lore=1,
+            rarity=Rarity.RARE
         )
-        return character
     
     def create_friendly_character(self, name="Friendly Character"):
         """Create a friendly character that should not be affected."""
-        character = CharacterCard(
-            id=3,
-            name=name,
-            version="Test",
-            full_name=f"{name} - Test",
+        return create_test_character(
+            name=f"{name} - Test",
             cost=3,
             color=CardColor.AMBER,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=3,
-            story="Test",
-            abilities=[],
             strength=2,
             willpower=3,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
-        return character
     
     def test_heroism_triggers_on_play(self):
         """Test that HEROISM triggers when the character is played."""

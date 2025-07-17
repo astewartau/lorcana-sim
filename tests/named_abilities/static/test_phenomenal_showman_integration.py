@@ -1,93 +1,53 @@
 """Integration tests for PHENOMENAL SHOWMAN - While this character is exerted, opposing characters can't ready at the start of their turn."""
 
 import pytest
-from src.lorcana_sim.models.game.game_state import GameState
-from src.lorcana_sim.models.game.player import Player
-from src.lorcana_sim.models.cards.character_card import CharacterCard
 from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-from src.lorcana_sim.models.abilities.composable.named_abilities import NamedAbilityRegistry
-from src.lorcana_sim.engine.event_system import GameEventManager, GameEvent, EventContext
+from src.lorcana_sim.engine.event_system import GameEvent, EventContext
+from tests.helpers import BaseNamedAbilityTest, create_test_character, add_named_ability
 
 
-class TestPhenomenalShowmanIntegration:
+class TestPhenomenalShowmanIntegration(BaseNamedAbilityTest):
     """Integration tests for PHENOMENAL SHOWMAN named ability."""
-    
-    def setup_method(self):
-        """Set up test environment with players and game state."""
-        self.player1 = Player("Player 1")
-        self.player2 = Player("Player 2")
-        self.game_state = GameState([self.player1, self.player2])
-        self.event_manager = GameEventManager(self.game_state)
-        self.game_state.event_manager = self.event_manager
     
     def create_phenomenal_showman_character(self, name="Genie - The Ever Impressive"):
         """Create a character with PHENOMENAL SHOWMAN ability."""
-        character = CharacterCard(
-            id=1,
-            name=name.split(" - ")[0],
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=6,
             color=CardColor.SAPPHIRE,
-            inkwell=True,
-            rarity=Rarity.LEGENDARY,
-            set_code="1",
-            number=1,
-            story="Test",
-            abilities=[],
             strength=5,
             willpower=6,
-            lore=3
+            lore=3,
+            rarity=Rarity.LEGENDARY
         )
         
-        # Add PHENOMENAL SHOWMAN ability
-        ability_data = {"name": "PHENOMENAL SHOWMAN", "type": "static"}
-        phenomenal_showman_ability = NamedAbilityRegistry.create_ability("PHENOMENAL SHOWMAN", character, ability_data)
-        character.composable_abilities = [phenomenal_showman_ability]
-        character.register_composable_abilities(self.event_manager)
-        
+        add_named_ability(character, "PHENOMENAL SHOWMAN", "static", self.event_manager)
         return character
     
     def create_opponent_character(self, name="Opponent Character", exerted=False):
         """Create an opponent character."""
-        character = CharacterCard(
-            id=2,
+        character = create_test_character(
             name=name,
-            version="Test",
-            full_name=f"{name} - Test",
             cost=4,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=2,
-            story="Test",
-            abilities=[],
             strength=3,
             willpower=4,
-            lore=2
+            lore=2,
+            rarity=Rarity.RARE
         )
         character.exerted = exerted
         return character
     
     def create_friendly_character(self, name="Friendly Character", exerted=False):
         """Create a friendly character for comparison."""
-        character = CharacterCard(
-            id=3,
+        character = create_test_character(
             name=name,
-            version="Test",
-            full_name=f"{name} - Test",
             cost=3,
             color=CardColor.SAPPHIRE,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=3,
-            story="Test",
-            abilities=[],
             strength=2,
             willpower=3,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
         character.exerted = exerted
         return character

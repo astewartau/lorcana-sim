@@ -1,99 +1,50 @@
 """Integration tests for VOICELESS - This character can't ⟳ to sing songs."""
 
 import pytest
-from src.lorcana_sim.models.game.game_state import GameState
-from src.lorcana_sim.models.game.player import Player
-from src.lorcana_sim.models.cards.character_card import CharacterCard
-from src.lorcana_sim.models.cards.action_card import ActionCard
 from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-from src.lorcana_sim.models.abilities.composable.named_abilities import NamedAbilityRegistry
-from src.lorcana_sim.engine.event_system import GameEventManager
+from tests.helpers import BaseNamedAbilityTest, create_test_character, add_named_ability, create_test_action_card, add_singer_ability
 
 
-class TestVoicelessIntegration:
+class TestVoicelessIntegration(BaseNamedAbilityTest):
     """Integration tests for VOICELESS named ability."""
-    
-    def setup_method(self):
-        """Set up test environment with players and game state."""
-        self.player1 = Player("Player 1")
-        self.player2 = Player("Player 2")
-        self.game_state = GameState([self.player1, self.player2])
-        self.event_manager = GameEventManager(self.game_state)
-        self.game_state.event_manager = self.event_manager
     
     def create_voiceless_character(self, name="Ariel - On Human Legs"):
         """Create a character with VOICELESS ability."""
-        character = CharacterCard(
-            id=1,
-            name=name.split(" - ")[0],
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=3,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=1,
-            story="Test",
-            abilities=[],
             strength=2,
             willpower=3,
-            lore=2
+            lore=2,
+            rarity=Rarity.RARE
         )
         
-        # Add VOICELESS ability
-        ability_data = {"name": "VOICELESS", "type": "static"}
-        voiceless_ability = NamedAbilityRegistry.create_ability("VOICELESS", character, ability_data)
-        character.composable_abilities = [voiceless_ability]
-        character.register_composable_abilities(self.event_manager)
-        
+        add_named_ability(character, "VOICELESS", "static", self.event_manager)
         return character
     
     def create_song_card(self, name="A Whole New World", cost=4):
         """Create a song card for testing."""
-        song = ActionCard(
-            id=2,
+        return create_test_action_card(
             name=name,
-            version="",
-            full_name=name,
             cost=cost,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=2,
-            story="Test",
-            abilities=[]
+            rarity=Rarity.COMMON
         )
-        return song
     
     def create_singer_character(self, singer_cost=4):
         """Create a character with Singer ability for comparison."""
-        from src.lorcana_sim.models.abilities.composable.keyword_abilities import create_singer_ability
-        
-        singer = CharacterCard(
-            id=3,
-            name="Belle",
-            version="Hidden Depths",
-            full_name="Belle - Hidden Depths", 
+        singer = create_test_character(
+            name="Belle - Hidden Depths",
             cost=2,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=3,
-            story="Test",
-            abilities=[],
             strength=1,
             willpower=4,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
         
-        # Add Singer ability
-        singer_ability = create_singer_ability(singer_cost, singer)
-        singer.composable_abilities = [singer_ability]
-        singer.register_composable_abilities(self.event_manager)
-        
+        add_singer_ability(singer, singer_cost, self.event_manager)
         return singer
     
     def test_voiceless_prevents_singing(self):

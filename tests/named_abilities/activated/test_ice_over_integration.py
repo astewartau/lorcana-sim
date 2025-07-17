@@ -1,93 +1,53 @@
 """Integration tests for ICE OVER - ↷, 2 ⬢ - Exert chosen character. They can't ready at the start of their next turn."""
 
 import pytest
-from src.lorcana_sim.models.game.game_state import GameState
-from src.lorcana_sim.models.game.player import Player
-from src.lorcana_sim.models.cards.character_card import CharacterCard
 from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-from src.lorcana_sim.models.abilities.composable.named_abilities import NamedAbilityRegistry
-from src.lorcana_sim.engine.event_system import GameEventManager, GameEvent, EventContext
+from src.lorcana_sim.engine.event_system import GameEvent, EventContext
+from tests.helpers import BaseNamedAbilityTest, create_test_character, add_named_ability
 
 
-class TestIceOverIntegration:
+class TestIceOverIntegration(BaseNamedAbilityTest):
     """Integration tests for ICE OVER named ability."""
-    
-    def setup_method(self):
-        """Set up test environment with players and game state."""
-        self.player1 = Player("Player 1")
-        self.player2 = Player("Player 2")
-        self.game_state = GameState([self.player1, self.player2])
-        self.event_manager = GameEventManager(self.game_state)
-        self.game_state.event_manager = self.event_manager
     
     def create_ice_over_character(self, name="Elsa - Ice Queen"):
         """Create a character with ICE OVER ability."""
-        character = CharacterCard(
-            id=1,
-            name=name.split(" - ")[0],
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=7,
             color=CardColor.AMETHYST,
-            inkwell=True,
-            rarity=Rarity.LEGENDARY,
-            set_code="1",
-            number=1,
-            story="Test",
-            abilities=[],
             strength=3,
             willpower=7,
-            lore=3
+            lore=3,
+            rarity=Rarity.LEGENDARY
         )
         
-        # Add ICE OVER ability
-        ability_data = {"name": "ICE OVER", "type": "activated", "cost": 2}
-        ice_over_ability = NamedAbilityRegistry.create_ability("ICE OVER", character, ability_data)
-        character.composable_abilities = [ice_over_ability]
-        character.register_composable_abilities(self.event_manager)
-        
+        add_named_ability(character, "ICE OVER", "activated", self.event_manager)
         return character
     
     def create_target_character(self, name="Target Character", exerted=False):
         """Create a character to target with ICE OVER."""
-        character = CharacterCard(
-            id=2,
-            name=name,
-            version="Test",
-            full_name=f"{name} - Test",
+        character = create_test_character(
+            name=f"{name} - Test",
             cost=4,
             color=CardColor.RUBY,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=2,
-            story="Test",
-            abilities=[],
             strength=3,
             willpower=4,
-            lore=2
+            lore=2,
+            rarity=Rarity.COMMON
         )
         character.exerted = exerted
         return character
     
     def create_opponent_character(self, name="Opponent Character", exerted=False):
         """Create an opponent character to target."""
-        character = CharacterCard(
-            id=3,
-            name=name,
-            version="Test",
-            full_name=f"{name} - Test",
+        character = create_test_character(
+            name=f"{name} - Test",
             cost=3,
             color=CardColor.SAPPHIRE,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=3,
-            story="Test",
-            abilities=[],
             strength=2,
             willpower=3,
-            lore=1
+            lore=1,
+            rarity=Rarity.RARE
         )
         character.exerted = exerted
         return character
@@ -119,9 +79,7 @@ class TestIceOverIntegration:
         # Player needs enough ink to pay cost
         self.player1.ink_used_this_turn = 0  # Reset ink usage
         # Add ink to inkwell to have available ink
-        from src.lorcana_sim.models.cards.character_card import CharacterCard
-        from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]  # 2 ink available
         
         # ICE OVER should require exerting the character and paying 2 ink
@@ -141,9 +99,7 @@ class TestIceOverIntegration:
         self.player1.characters_in_play.append(ice_over_char)
         self.player2.characters_in_play.append(target_char)
         self.player1.ink_used_this_turn = 0
-        from src.lorcana_sim.models.cards.character_card import CharacterCard
-        from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]
         
         # Target should start ready
@@ -166,9 +122,7 @@ class TestIceOverIntegration:
         self.player1.characters_in_play.append(ice_over_char)
         self.player2.characters_in_play.append(target_char)
         self.player1.ink_used_this_turn = 0
-        from src.lorcana_sim.models.cards.character_card import CharacterCard
-        from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]
         
         # Simulate ICE OVER effect
@@ -188,9 +142,7 @@ class TestIceOverIntegration:
         self.player1.characters_in_play.extend([ice_over_char, friendly_target])
         self.player2.characters_in_play.append(opponent_target)
         self.player1.ink_used_this_turn = 0
-        from src.lorcana_sim.models.cards.character_card import CharacterCard
-        from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]
         
         # Should be able to target both friendly and opposing characters
@@ -210,9 +162,7 @@ class TestIceOverIntegration:
         self.player1.characters_in_play.append(ice_over_char)
         self.player2.characters_in_play.append(exerted_target)
         self.player1.ink_used_this_turn = 0
-        from src.lorcana_sim.models.cards.character_card import CharacterCard
-        from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]
         
         # Should be able to target already exerted characters
@@ -231,9 +181,7 @@ class TestIceOverIntegration:
         self.player1.characters_in_play.append(ice_over_char)
         self.player2.characters_in_play.append(target_char)
         self.player1.ink_used_this_turn = 0
-        from src.lorcana_sim.models.cards.character_card import CharacterCard
-        from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]
         
         # Should not be able to activate when exerted
@@ -253,7 +201,7 @@ class TestIceOverIntegration:
         
         # Not enough ink
         self.player1.ink_used_this_turn = 0
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card]  # Only 1 ink, need 2
         
         # Should not be able to activate without sufficient ink
@@ -273,9 +221,7 @@ class TestIceOverIntegration:
         self.player1.characters_in_play.extend([ice_over_char, target1, target2])
         self.player2.characters_in_play.append(target3)
         self.player1.ink_used_this_turn = 0
-        from src.lorcana_sim.models.cards.character_card import CharacterCard
-        from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]
         
         # Should be able to choose from multiple targets
@@ -295,9 +241,7 @@ class TestIceOverIntegration:
         ice_over_char.exerted = False
         self.player1.characters_in_play.append(ice_over_char)
         self.player1.ink_used_this_turn = 0
-        from src.lorcana_sim.models.cards.character_card import CharacterCard
-        from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-        ink_card = CharacterCard(99, "Ink", "Test", "Ink", 1, CardColor.AMBER, True, Rarity.COMMON, "1", 99, "Test", [], 1, 1, 1)
+        ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]
         
         # Depending on implementation, character might target itself

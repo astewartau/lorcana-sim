@@ -1,94 +1,52 @@
 """Integration tests for LOYAL - If you have a character named Gaston in play, you pay 1 ⬢ less to play this character."""
 
 import pytest
-from src.lorcana_sim.models.game.game_state import GameState
-from src.lorcana_sim.models.game.player import Player
-from src.lorcana_sim.models.cards.character_card import CharacterCard
 from src.lorcana_sim.models.cards.base_card import CardColor, Rarity
-from src.lorcana_sim.models.abilities.composable.named_abilities import NamedAbilityRegistry
-from src.lorcana_sim.engine.event_system import GameEventManager, GameEvent, EventContext
+from src.lorcana_sim.engine.event_system import GameEvent, EventContext
+from tests.helpers import BaseNamedAbilityTest, create_test_character, add_named_ability
 
 
-class TestLoyalIntegration:
+class TestLoyalIntegration(BaseNamedAbilityTest):
     """Integration tests for LOYAL named ability."""
-    
-    def setup_method(self):
-        """Set up test environment with players and game state."""
-        self.player1 = Player("Player 1")
-        self.player2 = Player("Player 2")
-        self.game_state = GameState([self.player1, self.player2])
-        self.event_manager = GameEventManager(self.game_state)
-        self.game_state.event_manager = self.event_manager
     
     def create_loyal_character(self, name="LeFou - Bumbler", cost=2):
         """Create a character with LOYAL ability."""
-        character = CharacterCard(
-            id=1,
-            name=name.split(" - ")[0],
-            version=name.split(" - ")[1] if " - " in name else "Test",
-            full_name=name,
+        character = create_test_character(
+            name=name,
             cost=cost,
             color=CardColor.AMBER,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=1,
-            story="Test",
-            abilities=[],
             strength=1,
             willpower=2,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
         
-        # Add LOYAL ability
-        ability_data = {"name": "LOYAL", "type": "static"}
-        loyal_ability = NamedAbilityRegistry.create_ability("LOYAL", character, ability_data)
-        character.composable_abilities = [loyal_ability]
-        character.register_composable_abilities(self.event_manager)
-        
+        add_named_ability(character, "LOYAL", "static", self.event_manager)
         return character
     
     def create_gaston_character(self, name="Gaston - Arrogant Hunter"):
         """Create a Gaston character."""
-        gaston = CharacterCard(
-            id=2,
-            name="Gaston",
-            version="Arrogant Hunter",
-            full_name=name,
+        return create_test_character(
+            name=name,
             cost=4,
             color=CardColor.AMBER,
-            inkwell=True,
-            rarity=Rarity.RARE,
-            set_code="1",
-            number=2,
-            story="Test",
-            abilities=[],
             strength=4,
             willpower=3,
-            lore=2
+            lore=2,
+            rarity=Rarity.RARE
         )
-        return gaston
     
     def create_other_character(self, name="Belle - Bookworm"):
         """Create a non-Gaston character for comparison."""
-        character = CharacterCard(
-            id=3,
-            name="Belle",
-            version="Bookworm",
-            full_name=name,
+        return create_test_character(
+            name=name,
             cost=3,
             color=CardColor.AMBER,
-            inkwell=True,
-            rarity=Rarity.COMMON,
-            set_code="1",
-            number=3,
-            story="Test",
-            abilities=[],
             strength=2,
             willpower=3,
-            lore=1
+            lore=1,
+            rarity=Rarity.COMMON
         )
-        return character
     
     def test_loyal_cost_reduction_with_gaston(self):
         """Test that LOYAL reduces cost when Gaston is in play."""
