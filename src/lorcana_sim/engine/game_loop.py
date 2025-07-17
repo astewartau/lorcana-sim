@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..models.game.game_state import GameState, GameAction, Phase
-from .stepped_game_engine import SteppedGameEngine
+from .game_engine import GameEngine
 from .step_system import ExecutionMode, StepType, StepStatus
 from .input_system import PlayerInput, AbilityInputBuilder
 
@@ -42,7 +42,7 @@ class InteractiveGameLoop:
     """High-level game loop for interactive step-by-step gameplay."""
     
     def __init__(self, game_state: GameState, execution_mode: ExecutionMode = ExecutionMode.PAUSE_ON_INPUT):
-        self.engine = SteppedGameEngine(game_state, execution_mode)
+        self.engine = GameEngine(game_state, execution_mode)
         self.game_state = game_state
         self.state = GameLoopState.WAITING_FOR_PLAYER_ACTION
         self.current_choice: Optional[GameChoice] = None
@@ -116,7 +116,8 @@ class InteractiveGameLoop:
         
         # Execute the action using stepped engine
         self.state = GameLoopState.EXECUTING_ACTION
-        success, message = self.engine.execute_action_stepped(action, parameters)
+        result = self.engine.execute_action(action, parameters)
+        success, message = result.success, str(result)
         
         if not success:
             self.state = GameLoopState.WAITING_FOR_PLAYER_ACTION

@@ -15,6 +15,7 @@ from src.lorcana_sim.models.cards.base_card import Card, CardColor, Rarity
 from src.lorcana_sim.engine.move_validator import MoveValidator
 from src.lorcana_sim.engine.game_engine import GameEngine
 from src.lorcana_sim.engine.action_result import ActionResult
+from src.lorcana_sim.engine.step_system import ExecutionMode
 
 
 @pytest.fixture
@@ -454,13 +455,13 @@ class TestGameEngine:
     
     def test_engine_creation(self, game_state):
         """Test creating a game engine."""
-        engine = GameEngine(game_state)
+        engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
         assert engine.game_state == game_state
         assert isinstance(engine.validator, MoveValidator)
     
     def test_execute_play_ink(self, game_state, mock_character):
         """Test executing play ink action."""
-        engine = GameEngine(game_state)
+        engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
         game_state.current_phase = Phase.PLAY
         
         # Should succeed
@@ -476,7 +477,7 @@ class TestGameEngine:
     
     def test_execute_play_character(self, game_state, mock_character):
         """Test executing play character action."""
-        engine = GameEngine(game_state)
+        engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
         game_state.current_phase = Phase.PLAY
         
         # Give player enough ink
@@ -494,7 +495,7 @@ class TestGameEngine:
     
     def test_execute_invalid_action(self, game_state, mock_character):
         """Test executing invalid action fails."""
-        engine = GameEngine(game_state)
+        engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
         game_state.current_phase = Phase.READY  # Can't play characters in ready phase
         
         result = engine.execute_action(

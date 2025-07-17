@@ -26,7 +26,7 @@ from .action_queue import ActionQueue, ActionPriority, QueuedAction
 class GameEngine:
     """Executes game actions and manages state transitions with step-by-step support."""
     
-    def __init__(self, game_state: GameState, execution_mode: ExecutionMode):
+    def __init__(self, game_state: GameState, execution_mode: ExecutionMode = ExecutionMode.PAUSE_ON_INPUT):
         self.game_state = game_state
         self.validator = MoveValidator(game_state)
         self.event_manager = GameEventManager(game_state)
@@ -85,7 +85,7 @@ class GameEngine:
         """Trigger an event with choice manager included in the context."""
         # Add choice manager to the event context's additional data
         if not event_context.additional_data:
-            event_context.additional_data = {}
+        event_context.additional_data = {}
         event_context.additional_data['choice_manager'] = self.choice_manager
         
         return self.event_manager.trigger_event(event_context)
@@ -97,7 +97,7 @@ class GameEngine:
             # Set the last event with structured data
             source = "normal_draw"
             if self.game_state.current_phase.value == "draw":
-                source = "draw_phase"
+            source = "draw_phase"
             
             self.game_state.set_last_event(
                 'CARD_DRAWN',
@@ -114,9 +114,9 @@ class GameEngine:
             
             # Store zone events for later processing if any
             if zone_events and not hasattr(self, '_pending_zone_events'):
-                self._pending_zone_events = []
+            self._pending_zone_events = []
             if zone_events:
-                self._pending_zone_events.extend(zone_events)
+            self._pending_zone_events.extend(zone_events)
             
             # Trigger CARD_DRAWN event
             draw_context = EventContext(
@@ -143,70 +143,66 @@ class GameEngine:
                           not self.game_state.first_turn_draw_skipped)
         
         if should_draw:
-            self.draw_card_with_events(current_player)
+        self.draw_card_with_events(current_player)
         elif self.game_state.turn_number == 1 and self.game_state.current_player_index == 0:
-            self.game_state.first_turn_draw_skipped = True
+        self.game_state.first_turn_draw_skipped = True
         
         # Don't call draw_step() - we already drew the card with events above
     
-    def _execute_action_direct(self, action, parameters: Dict[str, Any]) -> ActionResult:
-        """Execute a game action directly (internal use only)."""
+    def execute_action(self, action, parameters: Dict[str, Any]) -> ActionResult:
+        """Execute a game action and update state."""
         # Convert string actions to GameAction enum if needed
         if isinstance(action, str):
-            try:
-                action = GameAction(action)
+        try:
+            action = GameAction(action)
             except ValueError:
-                return ActionResult.failure_result(action, f"Unknown action: {action}")
+            return ActionResult.failure_result(action, f"Unknown action: {action}")
         
         # Check if game is over
         if self.game_state.is_game_over():
-            result, winner, reason = self.game_state.get_game_result()
+        result, winner, reason = self.game_state.get_game_result()
             return ActionResult.failure_result(action, f"Game is over: {reason}")
         
         # Validate action first
         is_valid, message = self.validator.validate_action(action, parameters)
         if not is_valid:
-            return ActionResult.failure_result(action, message)
+        return ActionResult.failure_result(action, message)
         
         # Record action for stalemate detection
         self.game_state.record_action(action)
         
         # Execute the action
         try:
-            if action == GameAction.PLAY_INK:
-               return self._execute_play_ink(parameters['card'])
+        if action == GameAction.PLAY_INK:
+            return self._execute_play_ink(parameters['card'])
             elif action == GameAction.PLAY_CHARACTER:
-                return self._execute_play_character(parameters['card'])
+            return self._execute_play_character(parameters['card'])
             elif action == GameAction.PLAY_ACTION:
-                return self._execute_play_action(parameters['card'])
+            return self._execute_play_action(parameters['card'])
             elif action == GameAction.PLAY_ITEM:
-                return self._execute_play_item(parameters['card'])
+            return self._execute_play_item(parameters['card'])
             elif action == GameAction.QUEST_CHARACTER:
-                return self._execute_quest_character(parameters['character'])
+            return self._execute_quest_character(parameters['character'])
             elif action == GameAction.CHALLENGE_CHARACTER:
-                return self._execute_challenge(parameters['attacker'], parameters['defender'])
+            return self._execute_challenge(parameters['attacker'], parameters['defender'])
             elif action == GameAction.SING_SONG:
-                return self._execute_sing_song(parameters['song'], parameters['singer'])
+            return self._execute_sing_song(parameters['song'], parameters['singer'])
             elif action == GameAction.PROGRESS:
-                return self._execute_progress()
+            return self._execute_progress()
             elif action == GameAction.PASS_TURN:
-                return self._execute_pass_turn()
+            return self._execute_pass_turn()
             else:
-                return ActionResult.failure_result(action, f"Unknown action: {action}")
+            return ActionResult.failure_result(action, f"Unknown action: {action}")
         
         except Exception as e:
-            return ActionResult.failure_result(action, f"Error executing action: {str(e)}")
-    
-    def execute_action(self, action, parameters: Dict[str, Any]) -> ActionResult:
-        """Execute a game action directly (legacy compatibility)."""
-        return self._execute_action_direct(action, parameters)
+        return ActionResult.failure_result(action, f"Error executing action: {str(e)}")
     
     def _execute_play_ink(self, card: Card) -> ActionResult:
         """Execute playing a card as ink."""
         current_player = self.game_state.current_player
         
         if current_player.play_ink(card):
-            self.game_state.ink_played_this_turn = True
+        self.game_state.ink_played_this_turn = True
             self.game_state.actions_this_turn.append(GameAction.PLAY_INK)
             
             # Trigger INK_PLAYED event
@@ -236,7 +232,7 @@ class GameEngine:
         current_player = self.game_state.current_player
         
         if current_player.play_character(character, character.cost):
-            print(f"DEBUG: Successfully played character {character.name}")
+        print(f"DEBUG: Successfully played character {character.name}")
             self.game_state.actions_this_turn.append(GameAction.PLAY_CHARACTER)
             
             print(f"DEBUG: Setting turn_played for {character.name}")
@@ -249,13 +245,13 @@ class GameEngine:
             
             # Register composable abilities this character has
             try:
-                print(f"DEBUG: About to register composable abilities for {character.name}")
+            print(f"DEBUG: About to register composable abilities for {character.name}")
                 print(f"DEBUG: Character {character.name} has {len(character.composable_abilities)} composable abilities")
                 for ability in character.composable_abilities:
-                    print(f"DEBUG: Registering ability {ability.name}")
+                print(f"DEBUG: Registering ability {ability.name}")
                     self.event_manager.register_composable_ability(ability)
             except Exception as e:
-                print(f"DEBUG: Exception during ability registration: {e}")
+            print(f"DEBUG: Exception during ability registration: {e}")
                 import traceback
                 traceback.print_exc()
             
@@ -265,9 +261,9 @@ class GameEngine:
             
             # Store zone events for message processing later
             if zone_events and not hasattr(self, '_pending_zone_events'):
-                self._pending_zone_events = []
+            self._pending_zone_events = []
             if zone_events:
-                self._pending_zone_events.extend(zone_events)
+            self._pending_zone_events.extend(zone_events)
             
             # Trigger CHARACTER_ENTERS_PLAY event (more general)
             enters_context = EventContext(
@@ -287,7 +283,7 @@ class GameEngine:
             )
             played_results = self.trigger_event_with_choices(played_context)
             if played_results:
-                trigger_results.extend(played_results)
+            trigger_results.extend(played_results)
             
             # Include zone events in the result
             result_data = {
@@ -300,7 +296,7 @@ class GameEngine:
             
             # Add zone events if any occurred
             if hasattr(self, '_pending_zone_events') and self._pending_zone_events:
-                result_data['zone_events'] = self._pending_zone_events.copy()
+            result_data['zone_events'] = self._pending_zone_events.copy()
                 self._pending_zone_events.clear()
             
             return ActionResult.success_result(
@@ -316,7 +312,7 @@ class GameEngine:
         current_player = self.game_state.current_player
         
         if current_player.play_action(action, action.cost):
-            self.game_state.actions_this_turn.append(GameAction.PLAY_ACTION)
+        self.game_state.actions_this_turn.append(GameAction.PLAY_ACTION)
             
             # Trigger ACTION_PLAYED event
             action_context = EventContext(
@@ -329,7 +325,7 @@ class GameEngine:
             
             # If it's a song, also trigger SONG_PLAYED event
             if action.is_song:
-                song_context = EventContext(
+            song_context = EventContext(
                     event_type=GameEvent.SONG_PLAYED,
                     source=action,
                     player=current_player,
@@ -337,7 +333,7 @@ class GameEngine:
                 )
                 song_results = self.event_manager.trigger_event(song_context)
                 if song_results:
-                    trigger_results.extend(song_results)
+                trigger_results.extend(song_results)
             
             return ActionResult.success_result(
                 action_type=GameAction.PLAY_ACTION,
@@ -356,7 +352,7 @@ class GameEngine:
         current_player = self.game_state.current_player
         
         if current_player.play_item(item, item.cost):
-            self.game_state.actions_this_turn.append(GameAction.PLAY_ITEM)
+        self.game_state.actions_this_turn.append(GameAction.PLAY_ITEM)
             
             # Trigger ITEM_PLAYED event
             item_context = EventContext(
@@ -382,7 +378,7 @@ class GameEngine:
     def _execute_quest_character(self, character: CharacterCard) -> ActionResult:
         """Execute questing with a character."""
         if character.can_quest(self.game_state.turn_number) and not self.game_state.has_character_acted_this_turn(character.id):
-            character.exert()
+        character.exert()
             self.game_state.mark_character_acted(character.id)
             current_player = self.game_state.current_player
             
@@ -411,11 +407,11 @@ class GameEngine:
             )
             lore_results = self.event_manager.trigger_event(lore_context)
             if lore_results:
-                trigger_results.extend(lore_results)
+            trigger_results.extend(lore_results)
             
             # Clear temporary lore bonus
             if hasattr(character, 'temporary_lore_bonus'):
-                character.temporary_lore_bonus = 0
+            character.temporary_lore_bonus = 0
             
             self.game_state.actions_this_turn.append(GameAction.QUEST_CHARACTER)
             
@@ -432,17 +428,17 @@ class GameEngine:
         
         # Check if character has already acted this turn
         if self.game_state.has_character_acted_this_turn(character.id):
-            return ActionResult.failure_result(GameAction.QUEST_CHARACTER, "Character has already acted this turn")
+        return ActionResult.failure_result(GameAction.QUEST_CHARACTER, "Character has already acted this turn")
         
         return ActionResult.failure_result(GameAction.QUEST_CHARACTER, "Character cannot quest")
     
     def _execute_challenge(self, attacker: CharacterCard, defender: CharacterCard) -> ActionResult:
         """Execute a challenge between characters."""
         if self.game_state.has_character_acted_this_turn(attacker.id):
-            return ActionResult.failure_result(GameAction.CHALLENGE_CHARACTER, "Character has already acted this turn")
+        return ActionResult.failure_result(GameAction.CHALLENGE_CHARACTER, "Character has already acted this turn")
         
         if not self.validator.can_challenge(attacker, defender):
-            return ActionResult.failure_result(GameAction.CHALLENGE_CHARACTER, "Invalid challenge")
+        return ActionResult.failure_result(GameAction.CHALLENGE_CHARACTER, "Invalid challenge")
         
         # Exert attacker and mark as acted
         attacker.exert()
@@ -484,7 +480,7 @@ class GameEngine:
             defender.damage += final_defender_damage
             defender_damage_taken = final_defender_damage
         else:
-            defender_damage_taken = 0
+        defender_damage_taken = 0
         
         # Calculate damage to attacker with ability modifications
         attacker_base_damage = defender.current_strength
@@ -511,7 +507,7 @@ class GameEngine:
             attacker.damage += final_attacker_damage
             attacker_damage_taken = final_attacker_damage
         else:
-            attacker_damage_taken = 0
+        attacker_damage_taken = 0
         
         # Remove banished characters and trigger banishment events
         opponent = self.game_state.opponent
@@ -550,7 +546,7 @@ class GameEngine:
             # Now remove from play and unregister abilities
             # Note: Some abilities like RECURRING GUST may have already moved the character to hand
             if attacker in current_player.characters_in_play:
-                current_player.characters_in_play.remove(attacker)
+            current_player.characters_in_play.remove(attacker)
                 current_player.discard_pile.append(attacker)
             # Unregister composable abilities from banished character
             attacker.unregister_composable_abilities(self.event_manager)
@@ -589,7 +585,7 @@ class GameEngine:
             # Now remove from play and unregister abilities
             # Note: Some abilities like RECURRING GUST may have already moved the character to hand
             if defender in opponent.characters_in_play:
-                opponent.characters_in_play.remove(defender)
+            opponent.characters_in_play.remove(defender)
                 opponent.discard_pile.append(defender)
             # Unregister composable abilities from banished character
             defender.unregister_composable_abilities(self.event_manager)
@@ -615,7 +611,7 @@ class GameEngine:
         
         # Remove song from hand, add to discard
         if song in current_player.hand:
-            current_player.hand.remove(song)
+        current_player.hand.remove(song)
             current_player.discard_pile.append(song)
             
             # Exert the singer
@@ -681,7 +677,7 @@ class GameEngine:
             
             # If we moved to a new player, trigger TURN_BEGINS
             if self.game_state.current_player_index != old_player_index:
-                new_player = self.game_state.current_player
+            new_player = self.game_state.current_player
                 turn_begin_context = EventContext(
                     event_type=GameEvent.TURN_BEGINS,
                     player=new_player,
@@ -733,7 +729,7 @@ class GameEngine:
             }
             
             if new_phase.value == 'set':
-                set_context = EventContext(
+            set_context = EventContext(
                     event_type=GameEvent.SET_STEP,
                     player=current_player,
                     game_state=self.game_state
@@ -742,7 +738,7 @@ class GameEngine:
                 self._execute_set_step()
                 
             elif new_phase.value == 'draw':
-                draw_context = EventContext(
+            draw_context = EventContext(
                     event_type=GameEvent.DRAW_STEP,
                     player=current_player,
                     game_state=self.game_state
@@ -763,9 +759,9 @@ class GameEngine:
                     # Find the most recent card drawn event
                     last_event = self.game_state.get_last_event()
                     if last_event and last_event.get('type') == 'CARD_DRAWN':
-                        cards_drawn_names = [card.name for card in last_event.get('cards_drawn', [])]
+                    cards_drawn_names = [card.name for card in last_event.get('cards_drawn', [])]
                         if cards_drawn_names:
-                            draw_events = [f"{current_player.name} drew {card_name}" for card_name in cards_drawn_names]
+                        draw_events = [f"{current_player.name} drew {card_name}" for card_name in cards_drawn_names]
                 
                 result_data.update({
                     'card_drawn': cards_drawn > 0,
@@ -779,11 +775,11 @@ class GameEngine:
                 
                 # Include zone events from drawing if any occurred
                 if hasattr(self, '_pending_zone_events') and self._pending_zone_events:
-                    result_data['zone_events'] = self._pending_zone_events.copy()
+                result_data['zone_events'] = self._pending_zone_events.copy()
                     self._pending_zone_events.clear()
                 
             elif new_phase.value == 'play':
-                play_context = EventContext(
+            play_context = EventContext(
                     event_type=GameEvent.MAIN_PHASE_BEGINS,
                     player=current_player,
                     game_state=self.game_state
@@ -829,9 +825,9 @@ class GameEngine:
         
         # Store turn change events for stepped engine processing
         if turn_change_events and not hasattr(self, '_pending_zone_events'):
-            self._pending_zone_events = []
+        self._pending_zone_events = []
         if turn_change_events:
-            self._pending_zone_events.extend(turn_change_events)
+        self._pending_zone_events.extend(turn_change_events)
         
         # Trigger TURN_BEGINS for new player
         new_player = self.game_state.current_player
@@ -865,7 +861,7 @@ class GameEngine:
         
         # Add turn change events if any occurred
         if hasattr(self, '_pending_zone_events') and self._pending_zone_events:
-            result_data['zone_events'] = self._pending_zone_events.copy()
+        result_data['zone_events'] = self._pending_zone_events.copy()
             self._pending_zone_events.clear()
         
         return ActionResult.success_result(
@@ -899,6 +895,20 @@ class GameEngine:
         """
         return self.choice_manager.provide_choice(choice_id, selected_option)
     
+    def auto_resolve_choices(self) -> int:
+        """
+        Auto-resolve all pending choices with their default options.
+        Useful for automated play or testing.
+        
+        Returns:
+        Number of choices that were auto-resolved
+        """
+        return self.choice_manager.auto_resolve_with_defaults()
+    
+    def clear_all_choices(self) -> None:
+        """Clear all pending choices and resume the game. Use with caution."""
+        self.choice_manager.clear_all_choices()
+    
     def get_choice_summary(self) -> Dict[str, Any]:
         """Get a summary of the current choice state for debugging/UI."""
         current_choice = self.get_current_choice()
@@ -918,12 +928,34 @@ class GameEngine:
     # STEP-BY-STEP SYSTEM METHODS
     # =============================================================================
     
+    def execute_action_with_override(self, action, parameters):
+        """Override execute_action to capture and queue event messages."""
+        # Capture last event before action
+        last_event_before = self.get_last_event()
+        timestamp_before = last_event_before.get('timestamp', -1) if last_event_before else -1
+        
+        # Execute the action using parent implementation
+        result = self.execute_action(action, parameters)
+        
+        # Check for new events and queue messages
+        last_event_after = self.get_last_event()
+        timestamp_after = last_event_after.get('timestamp', -1) if last_event_after else -1
+        
+        # If there's a new event, queue a message for it
+        if last_event_after and timestamp_after > timestamp_before:
+        self._queue_game_event_message(last_event_after)
+        
+        # Check for ability triggers during draw phase
+        if action.value == 'PROGRESS' and self.game_state.current_phase.value == 'draw':
+        self._check_for_ability_triggers()
+        
+        return result
     
     def next_message(self, move: Optional[GameMove] = None) -> GameMessage:
         """Get the next message in the game progression."""
         # Process move if provided
         if move and self.waiting_for_input:
-            self._process_move(move)
+        self._process_move(move)
             self.waiting_for_input = False
             
             # Evaluate conditional effects after move processing
@@ -931,25 +963,25 @@ class GameEngine:
         
         # Return queued messages first
         if self.message_queue:
-            message = self.message_queue.popleft()
+        message = self.message_queue.popleft()
             # Apply deferred action if this message has one
             if hasattr(message, 'deferred_action') and message.deferred_action:
                 # Apply the deferred effect now
                 try:
-                    result = message.deferred_action.effect.apply(message.deferred_action.target, message.deferred_action.context)
+                result = message.deferred_action.effect.apply(message.deferred_action.target, message.deferred_action.context)
                 except Exception as e:
-                    print(f"DEBUG: Error applying deferred action: {e}")
+                print(f"DEBUG: Error applying deferred action: {e}")
             return message
         
         # Process pending actions from action queue (highest priority)
         if self.action_queue.has_pending_actions():
-            message = self._process_next_queued_action()
+        message = self._process_next_queued_action()
             if message:
-                return message
+            return message
         
         # Execute next step if available
         if self.current_steps:
-            message = self._execute_next_step()
+        message = self._execute_next_step()
             
             # Evaluate conditional effects after step execution
             self._evaluate_conditional_effects_after_step()
@@ -958,11 +990,11 @@ class GameEngine:
         
         # Check for choices
         if self.current_choice or self.is_paused_for_choice():
-            if not self.current_choice:
-                self.current_choice = self.get_current_choice()
+        if not self.current_choice:
+            self.current_choice = self.get_current_choice()
             
             if self.current_choice:
-                self.waiting_for_input = True
+            self.waiting_for_input = True
                 return ChoiceRequiredMessage(
                     type=MessageType.CHOICE_REQUIRED,
                     player=self.current_choice.player,
@@ -972,22 +1004,22 @@ class GameEngine:
         
         # Check game over
         if self.game_state.is_game_over():
-            result, winner, game_over_data = self.game_state.get_game_result()
+        result, winner, game_over_data = self.game_state.get_game_result()
             # Build reason string from game_over_data for backward compatibility
             reason = ""
             if game_over_data:
-                context = game_over_data.get('context', {})
+            context = game_over_data.get('context', {})
                 result_type = context.get('result')
                 if result_type == 'lore_victory':
-                    winner_name = context.get('winner_name', 'Unknown')
+                winner_name = context.get('winner_name', 'Unknown')
                     lore = context.get('lore', 0)
                     reason = f"{winner_name} wins with {lore} lore!"
                 elif result_type == 'deck_exhaustion':
-                    winner_name = context.get('winner_name', 'Unknown')
+                winner_name = context.get('winner_name', 'Unknown')
                     loser_name = context.get('loser_name', 'Unknown')
                     reason = f"{winner_name} wins - {loser_name} ran out of cards!"
                 elif result_type == 'stalemate':
-                    reason = "Game ended in stalemate - both players unable to make progress"
+                reason = "Game ended in stalemate - both players unable to make progress"
             
             return GameOverMessage(
                 type=MessageType.GAME_OVER,
@@ -1005,25 +1037,55 @@ class GameEngine:
             legal_actions=self._get_legal_actions()
         )
     
+    def execute_action_stepped(self, action: GameAction, parameters: Dict[str, Any]) -> Tuple[bool, str]:
+        """Execute a game action using step-by-step progression."""
+        # Validate action first
+        is_valid, message = self.validator.validate_action(action, parameters)
+        if not is_valid:
+        return False, message
+        
+        # Create steps for the action
+        action_steps = self._create_action_steps(action, parameters)
+        if not action_steps:
+            # Fall back to immediate execution for actions without steps
+            result = self.execute_action(action, parameters)
+            return result.success, str(result)
+        
+        # Queue the steps
+        self.current_action_steps = action_steps
+        self.step_engine.queue_steps(action_steps)
+        
+        # Start execution
+        if self.step_engine.step_queue.execution_mode == ExecutionMode.PAUSE_ON_INPUT:
+            # Auto-advance until input needed
+            executed_steps = self.step_engine.continue_execution()
+            return True, f"Started {action.value} execution ({len(executed_steps)} steps completed)"
+        else:
+            # Manual mode - execute first step only
+            first_step = self.step_engine.execute_next_step()
+            if first_step:
+            return True, f"Started {action.value} execution (step: {first_step.description})"
+            else:
+            return False, "Failed to start action execution"
     
     def advance_step(self) -> Optional[GameStep]:
-        """Advance to the next step in manual mode."""
+        """Advance to the next step in manual mode (step mode only)."""
         return self.step_engine.execute_next_step()
     
     def provide_input_for_current_step(self, input_data: Any) -> Optional[GameStep]:
-        """Provide input for the current step that's waiting for input."""
+        """Provide input for the current step that's waiting for input (step mode only)."""
         return self.step_engine.provide_input(input_data)
     
     def get_current_step(self) -> Optional[GameStep]:
-        """Get the current step being executed."""
+        """Get the current step being executed (step mode only)."""
         return self.step_engine.get_current_step()
     
     def get_step_queue_status(self) -> Dict[str, Any]:
-        """Get the current status of the step queue."""
+        """Get the current status of the step queue (step mode only)."""
         return self.step_engine.get_queue_state()
     
     def pause_execution(self) -> None:
-        """Pause step execution."""
+        """Pause step execution (step mode only)."""
         self.step_engine.pause()
     
     def resume_execution(self) -> None:
@@ -1036,7 +1098,7 @@ class GameEngine:
         self.current_action_steps.clear()
     
     def set_execution_mode(self, mode: ExecutionMode) -> None:
-        """Set the execution mode."""
+        """Set the execution mode (step mode only)."""
         self.step_engine.step_queue.execution_mode = mode
     
     def register_player_input_provider(self, player_id: str, provider) -> None:
@@ -1057,7 +1119,7 @@ class GameEngine:
         """Trigger an event with choice manager and action queue included in the context."""
         # Add choice manager and action queue to the event context's additional data
         if not event_context.additional_data:
-            event_context.additional_data = {}
+        event_context.additional_data = {}
         event_context.additional_data['choice_manager'] = self.choice_manager
         event_context.additional_data['action_queue'] = self.action_queue
         
@@ -1077,7 +1139,7 @@ class GameEngine:
             # Queue draw event message
             cards_drawn = event.get('cards_drawn', [])
             for card in cards_drawn:
-                card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
+            card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
                 draw_message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
                     player=self.game_state.current_player,
@@ -1093,11 +1155,11 @@ class GameEngine:
         # Check if Royal Guard has gained challenger bonus (indicating HEAVILY ARMED triggered)
         current_player = self.game_state.current_player
         for character in current_player.characters_in_play:
-            if character.name == "Royal Guard" and character.current_challenger_bonus > 0:
+        if character.name == "Royal Guard" and character.current_challenger_bonus > 0:
                 # Check if this is a new bonus from this turn
                 for amount, duration in character.challenger_bonuses:
-                    if duration in ["turn", "this_turn"]:
-                        ability_message = StepExecutedMessage(
+                if duration in ["turn", "this_turn"]:
+                    ability_message = StepExecutedMessage(
                             type=MessageType.STEP_EXECUTED,
                             player=current_player,
                             step_id=f"heavily_armed_trigger",
@@ -1114,10 +1176,10 @@ class GameEngine:
             # Break action into steps and queue them
             steps = self._create_action_steps(move.action, move.parameters)
             if steps:
-                self.current_steps.extend(steps)
+            self.current_steps.extend(steps)
             else:
                 # Fall back to direct execution if no steps created
-                result = self._execute_action_direct(move.action, move.parameters)
+                result = self.execute_action(move.action, move.parameters)
                 self._queue_result_message(result)
             
         elif isinstance(move, (InkMove, PlayMove, QuestMove, ChallengeMove, SingMove)):
@@ -1125,10 +1187,10 @@ class GameEngine:
             action_move = self._convert_to_action_move(move)
             steps = self._create_action_steps(action_move.action, action_move.parameters)
             if steps:
-                self.current_steps.extend(steps)
+            self.current_steps.extend(steps)
             else:
                 # Fall back to direct execution if no steps created
-                result = self._execute_action_direct(action_move.action, action_move.parameters)
+                result = self.execute_action(action_move.action, action_move.parameters)
                 self._queue_result_message(result)
             
         elif isinstance(move, PassMove):
@@ -1136,22 +1198,22 @@ class GameEngine:
             # If we're in ready phase and this is the start of a new turn, execute ready step first
             if (self.game_state.current_phase.value == 'ready' and 
                 hasattr(self.game_state, '_needs_ready_step')):
-                readied_items = self.game_state.ready_step()
+            readied_items = self.game_state.ready_step()
                 # Queue ready step messages
                 for readied_item in readied_items:
-                    ready_message = StepExecutedMessage(
-                            type=MessageType.STEP_EXECUTED,
-                            player=self.game_state.current_player,
-                            step_id=f"character_readied",
-                            description="Character readied",  # Generic description
-                            result="Readied",
-                            event_data=readied_item  # Pass the full event data
+                ready_message = StepExecutedMessage(
+                        type=MessageType.STEP_EXECUTED,
+                        player=self.game_state.current_player,
+                        step_id=f"character_readied",
+                        description="Character readied",  # Generic description
+                        result="Readied",
+                        event_data=readied_item  # Pass the full event data
                     )
                     self.message_queue.append(ready_message)
                 # Clear the flag
                 delattr(self.game_state, '_needs_ready_step')
             
-            result = self._execute_action_direct(GameAction.PROGRESS, {})
+            result = self.execute_action(GameAction.PROGRESS, {})
             self._queue_result_message(result)
             
         elif isinstance(move, ChoiceMove):
@@ -1162,20 +1224,20 @@ class GameEngine:
     def _convert_to_action_move(self, move: GameMove) -> ActionMove:
         """Convert specific move types to generic action moves."""
         if isinstance(move, InkMove):
-            return ActionMove(GameAction.PLAY_INK, {'card': move.card})
+        return ActionMove(GameAction.PLAY_INK, {'card': move.card})
         elif isinstance(move, PlayMove):
-            if isinstance(move.card, CharacterCard):
-                return ActionMove(GameAction.PLAY_CHARACTER, {'card': move.card})
+        if isinstance(move.card, CharacterCard):
+            return ActionMove(GameAction.PLAY_CHARACTER, {'card': move.card})
             elif isinstance(move.card, ActionCard):
-                return ActionMove(GameAction.PLAY_ACTION, {'card': move.card})
+            return ActionMove(GameAction.PLAY_ACTION, {'card': move.card})
             elif isinstance(move.card, ItemCard):
-                return ActionMove(GameAction.PLAY_ITEM, {'card': move.card})
+            return ActionMove(GameAction.PLAY_ITEM, {'card': move.card})
         elif isinstance(move, QuestMove):
-            return ActionMove(GameAction.QUEST_CHARACTER, {'character': move.character})
+        return ActionMove(GameAction.QUEST_CHARACTER, {'character': move.character})
         elif isinstance(move, ChallengeMove):
-            return ActionMove(GameAction.CHALLENGE_CHARACTER, {'attacker': move.attacker, 'defender': move.defender})
+        return ActionMove(GameAction.CHALLENGE_CHARACTER, {'attacker': move.attacker, 'defender': move.defender})
         elif isinstance(move, SingMove):
-            return ActionMove(GameAction.SING_SONG, {'singer': move.singer, 'song': move.song})
+        return ActionMove(GameAction.SING_SONG, {'singer': move.singer, 'song': move.song})
         
         raise ValueError(f"Cannot convert move type: {type(move)}")
     
@@ -1191,13 +1253,13 @@ class GameEngine:
         step = self.current_steps.popleft()
         
         try:
-            result = step.execute_fn()
+        result = step.execute_fn()
             step.status = StepStatus.COMPLETED
             step.result = result
             
             # Check if step triggered a choice
             if self.is_paused_for_choice():
-                self.current_choice = self.get_current_choice()
+            self.current_choice = self.get_current_choice()
             
             return StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
@@ -1208,7 +1270,7 @@ class GameEngine:
             )
             
         except Exception as e:
-            step.status = StepStatus.CANCELLED
+        step.status = StepStatus.CANCELLED
             step.error = str(e)
             return StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
@@ -1223,14 +1285,14 @@ class GameEngine:
             
         result = self.action_queue.process_next_action()
         if not result:
-            return None
+        return None
         
         return self._create_action_message(result)
     
     def _create_action_message(self, result) -> Optional[GameMessage]:
         """Create a message from an action result."""
         if not result:
-            return None
+        return None
         
         # Get the action that was just executed from the result
         executed_action = result.queued_action  # This contains the action info
@@ -1265,7 +1327,7 @@ class GameEngine:
     def _extract_effect_data(self, executed_action, result) -> dict:
         """Extract structured data about an executed effect for UI formatting."""
         if not executed_action:
-            return {"type": "unknown"}
+        return {"type": "unknown"}
         
         from ..models.abilities.composable.effects import (
             DiscardCard, GainLoreEffect, DrawCards, BanishCharacter, 
@@ -1282,14 +1344,14 @@ class GameEngine:
             
             # Get player name from the controller or game context
             if hasattr(target, 'controller') and target.controller:
-                player_name = getattr(target.controller, 'name', 'Unknown Player')
+            player_name = getattr(target.controller, 'name', 'Unknown Player')
             else:
                 # Fallback: look in execution context for player info
                 context_player = executed_action.context.get('player')
                 if context_player and hasattr(context_player, 'name'):
-                    player_name = context_player.name
+                player_name = context_player.name
                 else:
-                    player_name = 'Unknown Player'
+                player_name = 'Unknown Player'
             
             return {
                 "type": "discard_card",
@@ -1299,54 +1361,54 @@ class GameEngine:
             }
         
         elif isinstance(effect, GainLoreEffect):
-            return {
-                    "type": "gain_lore",
-                    "amount": effect.amount,
-                    "target": target
-                }
+        return {
+                "type": "gain_lore",
+                "amount": effect.amount,
+                "target": target
+            }
         
         elif isinstance(effect, DrawCards):
-            return {
-                    "type": "draw_cards",
-                    "count": effect.count,
-                    "target": target
-                }
+        return {
+                "type": "draw_cards",
+                "count": effect.count,
+                "target": target
+            }
         
         elif isinstance(effect, BanishCharacter):
-            return {
-                    "type": "banish_character",
-                    "character_name": getattr(target, 'name', str(target)),
-                    "target": target
-                }
+        return {
+                "type": "banish_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
         
         elif isinstance(effect, ReturnToHand):
-            return {
-                    "type": "return_to_hand",
-                    "card_name": getattr(target, 'name', str(target)),
-                    "target": target
-                }
+        return {
+                "type": "return_to_hand",
+                "card_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
         
         elif isinstance(effect, ExertCharacter):
-            return {
-                    "type": "exert_character",
-                    "character_name": getattr(target, 'name', str(target)),
-                    "target": target
-                }
+        return {
+                "type": "exert_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
         
         elif isinstance(effect, ReadyCharacter):
-            return {
-                    "type": "ready_character",
-                    "character_name": getattr(target, 'name', str(target)),
-                    "target": target
-                }
+        return {
+                "type": "ready_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
         
         elif isinstance(effect, RemoveDamageEffect):
-            return {
-                    "type": "remove_damage",
-                    "amount": effect.amount,
-                    "character_name": getattr(target, 'name', str(target)),
-                    "target": target
-                }
+        return {
+                "type": "remove_damage",
+                "amount": effect.amount,
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
         
         else:
             # Generic effect data
@@ -1366,30 +1428,30 @@ class GameEngine:
             # Create a clean result description based on action type
             description = "Action completed"
             if hasattr(result, 'result_type'):
-                result_type = result.result_type.value
+            result_type = result.result_type.value
                 
                 # Create more descriptive messages
                 if result_type == "ink_played":
-                    card = result.data.get('card') if result.data else None
+                card = result.data.get('card') if result.data else None
                     card_name = card.name if card and hasattr(card, 'name') else 'card'
                     ink_after = result.data.get('ink_after', 0) if result.data else 0
                     total_ink = result.data.get('total_ink', 0) if result.data else 0
                     description = f"Inked {card_name} → {ink_after}/{total_ink} ink"
                 elif result_type == "character_played":
-                    character = result.data.get('character') if result.data else None
+                character = result.data.get('character') if result.data else None
                     char_name = character.name if character and hasattr(character, 'name') else 'character'
                     cost = character.cost if character and hasattr(character, 'cost') else 0
                     ink_after = result.data.get('ink_after', 0) if result.data else 0
                     total_ink = result.data.get('total_ink', 0) if result.data else 0
                     description = f"Played {char_name} ({cost} ink) → {ink_after}/{total_ink} ink"
                 elif result_type == "character_quested":
-                    character = result.data.get('character') if result.data else None
+                character = result.data.get('character') if result.data else None
                     char_name = character.name if character and hasattr(character, 'name') else 'character'
                     lore = result.data.get('lore_gained', 0) if result.data else 0
                     lore_after = result.data.get('lore_after', 0) if result.data else 0
                     description = f"{char_name} quested for {lore} lore → {lore_after} total"
                 elif result_type == "character_challenged":
-                    attacker = result.data.get('attacker') if result.data else None
+                attacker = result.data.get('attacker') if result.data else None
                     defender = result.data.get('defender') if result.data else None
                     attacker_name = attacker.name if attacker and hasattr(attacker, 'name') else 'character'
                     defender_name = defender.name if defender and hasattr(defender, 'name') else 'character'
@@ -1399,7 +1461,7 @@ class GameEngine:
                     defender_dmg = result.data.get('defender_damage_taken', 0) if result.data else 0
                     description = f"{attacker_name} ({attacker_str} str) vs {defender_name} ({defender_str} str) → {defender_dmg}/{attacker_dmg} damage"
                 elif result_type == "phase_advanced":
-                    old_phase = result.data.get('old_phase') if result.data else None
+                old_phase = result.data.get('old_phase') if result.data else None
                     new_phase = result.data.get('new_phase') if result.data else None
                     old_name = old_phase.value if old_phase and hasattr(old_phase, 'value') else 'phase'
                     new_name = new_phase.value if new_phase and hasattr(new_phase, 'value') else 'phase'
@@ -1414,17 +1476,17 @@ class GameEngine:
                     new_phase = result.data.get('new_phase') if result.data else None
                     
                     if old_player and new_player and new_phase:
-                        old_name = old_player.name.split(' ')[0]  # Just first name
+                    old_name = old_player.name.split(' ')[0]  # Just first name
                         new_name = new_player.name.split(' ')[0]  # Just first name  
                         phase_name = new_phase.value if hasattr(new_phase, 'value') else str(new_phase)
                         description = f"play ({old_name}) → {phase_name} phase ({new_name})"
                     else:
-                        description = "Turn ended"
+                    description = "Turn ended"
                     
                     # Process end-of-turn effect expiration
                     self._process_turn_end_effects()
                 else:
-                    description = result_type.replace('_', ' ').title()
+                description = result_type.replace('_', ' ').title()
             
             message = StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
@@ -1437,11 +1499,11 @@ class GameEngine:
             
             # Check for zone events (conditional effect activations) and queue them as separate messages
             if result.data and result.data.get('zone_events'):
-                for zone_event in result.data['zone_events']:
-                    event_type = zone_event.get('type', 'UNKNOWN_EVENT')
+            for zone_event in result.data['zone_events']:
+                event_type = zone_event.get('type', 'UNKNOWN_EVENT')
                     
                     if event_type == 'CONDITIONAL_EFFECT_APPLIED':
-                        from .game_event_types import GameEventType
+                    from .game_event_types import GameEventType
                         
                         zone_message = StepExecutedMessage(
                             type=MessageType.STEP_EXECUTED,
@@ -1455,7 +1517,7 @@ class GameEngine:
                         self.message_queue.append(zone_message)
                     
                     elif event_type == 'CONDITIONAL_EFFECT_REMOVED':
-                        from .game_event_types import GameEventType
+                    from .game_event_types import GameEventType
                         
                         zone_message = StepExecutedMessage(
                             type=MessageType.STEP_EXECUTED,
@@ -1477,7 +1539,7 @@ class GameEngine:
         
         # Set up event collection for composite effects
         if not hasattr(self.game_state, 'choice_events'):
-            self.game_state.choice_events = []
+        self.game_state.choice_events = []
         
         # Clear any previous choice events
         self.game_state.choice_events.clear()
@@ -1487,11 +1549,11 @@ class GameEngine:
         def wrapped_provide_choice(choice_id, selected_option):
             # Ensure choice_events is available during effect execution
             if not hasattr(self.game_state, 'choice_events'):
-                self.game_state.choice_events = []
+            self.game_state.choice_events = []
             
             # Also ensure the context in the current choice includes the correct game state and action queue
             if self.choice_manager.current_choice:
-                context = self.choice_manager.current_choice.trigger_context.get('_choice_execution_context', {})
+            context = self.choice_manager.current_choice.trigger_context.get('_choice_execution_context', {})
                 context['game_state'] = self.game_state
                 context['action_queue'] = self.action_queue  # Add action queue for deferred execution
                 self.choice_manager.current_choice.trigger_context['_choice_execution_context'] = context
@@ -1502,25 +1564,25 @@ class GameEngine:
         self.choice_manager.provide_choice = wrapped_provide_choice
         
         try:
-            success = self.provide_player_choice(choice_id, option)
+        success = self.provide_player_choice(choice_id, option)
         finally:
             # Restore original method
             self.choice_manager.provide_choice = original_provide_choice
             
         if not success:
-            raise ValueError(f"Failed to resolve choice {choice_id} with option {option}")
+        raise ValueError(f"Failed to resolve choice {choice_id} with option {option}")
         
         # After choice resolution, check if actions were queued and need to be processed
         if self.action_queue.has_pending_actions():
             # Process actions but DON'T apply effects yet - just prepare messages
             # Process ALL actions at once to ensure composite effects are fully split
             while self.action_queue.has_pending_actions():
-                result = self.action_queue.process_next_action(apply_effect=False)
+            result = self.action_queue.process_next_action(apply_effect=False)
                 if result:
                     # Create a message for this action (with deferred effect)
                     message = self._create_action_message(result)
                     if message:
-                        self.message_queue.append(message)
+                    self.message_queue.append(message)
     
     def _process_turn_end_effects(self) -> None:
         """Process effect expiration at end of turn."""
@@ -1532,11 +1594,11 @@ class GameEngine:
         
         # Clear temporary bonuses from all characters belonging to the ending player
         for character in ending_player.characters_in_play:
-            expired_effects = character.clear_temporary_bonuses(self.game_state)
+        expired_effects = character.clear_temporary_bonuses(self.game_state)
             
             # Queue messages for each expired effect
             for effect in expired_effects:
-                self._queue_choice_event_message(effect)
+            self._queue_choice_event_message(effect)
     
     def _queue_choice_event_message(self, event: dict) -> None:
         """Queue a message for a choice-triggered event."""
@@ -1551,7 +1613,7 @@ class GameEngine:
             # Queue draw event messages for choice-triggered draws
             cards_drawn = event.get('cards_drawn', [])
             for card in cards_drawn:
-                card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
+            card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
                 draw_message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
                     player=self.game_state.current_player,
@@ -1591,7 +1653,7 @@ class GameEngine:
         raw_actions = self.validator.get_all_legal_actions()
         
         for action, params in raw_actions:
-            legal_action = LegalAction(
+        legal_action = LegalAction(
                 action=action,
                 target=params.get('card') or params.get('character') or params.get('attacker'),
                 parameters=params
@@ -1606,7 +1668,7 @@ class GameEngine:
         def on_step_completed(step: GameStep):
             # Create snapshot after each completed step
             if step.status.value == "completed":
-                self.snapshot_manager.create_snapshot(
+            self.snapshot_manager.create_snapshot(
                     step.step_id, 
                     self.game_state,
                     {"step_description": step.description}
@@ -1618,40 +1680,40 @@ class GameEngine:
         """Set up input handlers for different step types."""
             
         def handle_choice_input(step: GameStep, input_data: Any) -> Any:
-            if not step.player_input or step.player_input.input_type != StepType.CHOICE:
-                raise ValueError("Step does not require choice input")
+        if not step.player_input or step.player_input.input_type != StepType.CHOICE:
+            raise ValueError("Step does not require choice input")
             
             if input_data not in step.player_input.options:
-                raise ValueError(f"Invalid choice: {input_data}")
+            raise ValueError(f"Invalid choice: {input_data}")
             
             return step.execute_fn(input_data)
         
         def handle_selection_input(step: GameStep, input_data: Any) -> Any:
-            if not step.player_input or step.player_input.input_type != StepType.SELECTION:
-                raise ValueError("Step does not require selection input")
+        if not step.player_input or step.player_input.input_type != StepType.SELECTION:
+            raise ValueError("Step does not require selection input")
             
             if not isinstance(input_data, list):
-                input_data = [input_data]
+            input_data = [input_data]
             
             constraints = step.player_input.constraints
             min_count = constraints.get('min_count', 1)
             max_count = constraints.get('max_count', 1)
             
             if len(input_data) < min_count or len(input_data) > max_count:
-                raise ValueError(f"Invalid selection count: {len(input_data)}")
+            raise ValueError(f"Invalid selection count: {len(input_data)}")
             
             for item in input_data:
-                if item not in step.player_input.options:
-                    raise ValueError(f"Invalid selection: {item}")
+            if item not in step.player_input.options:
+                raise ValueError(f"Invalid selection: {item}")
             
             return step.execute_fn(input_data)
         
         def handle_confirmation_input(step: GameStep, input_data: Any) -> Any:
-            if not step.player_input or step.player_input.input_type != StepType.CONFIRMATION:
-                raise ValueError("Step does not require confirmation input")
+        if not step.player_input or step.player_input.input_type != StepType.CONFIRMATION:
+            raise ValueError("Step does not require confirmation input")
             
             if not isinstance(input_data, bool):
-                raise ValueError("Confirmation input must be boolean")
+            raise ValueError("Confirmation input must be boolean")
             
             return step.execute_fn(input_data)
         
@@ -1665,7 +1727,7 @@ class GameEngine:
         """Get or create the condition evaluator instance."""
             
         if self._condition_evaluator is None:
-            from ..models.abilities.composable.condition_evaluator import ConditionEvaluator
+        from ..models.abilities.composable.condition_evaluator import ConditionEvaluator
             self._condition_evaluator = ConditionEvaluator()
         return self._condition_evaluator
     
@@ -1677,7 +1739,7 @@ class GameEngine:
         # Determine trigger type based on move
         trigger = EvaluationTrigger.STEP_EXECUTED
         if isinstance(move, PlayMove):
-            trigger = EvaluationTrigger.CARD_PLAYED
+        trigger = EvaluationTrigger.CARD_PLAYED
         elif isinstance(move, PassMove):
             # Check if this caused a phase or turn change
             trigger = EvaluationTrigger.PHASE_CHANGE
@@ -1723,10 +1785,10 @@ class GameEngine:
         """Queue conditional effect events as messages."""
             
         for event in events:
-            event_type = event.get('type')
+        event_type = event.get('type')
             
             if event_type == 'CONDITIONAL_EFFECT_APPLIED':
-                from .game_event_types import GameEventType
+            from .game_event_types import GameEventType
                 
                 message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
@@ -1741,7 +1803,7 @@ class GameEngine:
                 return  # Return early to avoid duplicating the message
             
             elif event_type == 'CONDITIONAL_EFFECT_REMOVED':
-                from .game_event_types import GameEventType
+            from .game_event_types import GameEventType
                 
                 message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
@@ -1756,7 +1818,7 @@ class GameEngine:
                 return  # Return early to avoid duplicating the message
             
             else:
-                description = f"Conditional effect event: {event_type}"
+            description = f"Conditional effect event: {event_type}"
                 
                 message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,

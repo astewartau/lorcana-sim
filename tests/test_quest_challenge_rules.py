@@ -7,6 +7,7 @@ from lorcana_sim.models.game.player import Player
 from lorcana_sim.models.cards.character_card import CharacterCard
 from lorcana_sim.models.cards.base_card import CardColor, Rarity
 from lorcana_sim.engine.game_engine import GameEngine
+from lorcana_sim.engine.step_system import ExecutionMode
 
 
 def create_test_character(name: str, cost: int = 3, strength: int = 2, willpower: int = 3, lore: int = 1) -> CharacterCard:
@@ -72,7 +73,7 @@ def test_character_cannot_quest_and_challenge_same_turn():
         player1.deck.append(deck_card)
         player2.deck.append(deck_card)
     
-    engine = GameEngine(game_state)
+    engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # First action: Quest with the attacker
     quest_result = engine.execute_action(GameAction.QUEST_CHARACTER, {'character': attacker})
@@ -135,7 +136,7 @@ def test_character_cannot_challenge_and_quest_same_turn():
         player1.deck.append(deck_card)
         player2.deck.append(deck_card)
     
-    engine = GameEngine(game_state)
+    engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # First action: Challenge with the attacker
     challenge_result = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
@@ -181,7 +182,7 @@ def test_exerted_character_cannot_quest():
     game_state.current_phase = game_state.current_phase.PLAY
     game_state.turn_number = 2  # Not first turn
     
-    engine = GameEngine(game_state)
+    engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # Try to quest with exerted character - should fail
     quest_result = engine.execute_action(GameAction.QUEST_CHARACTER, {'character': character})
@@ -225,7 +226,7 @@ def test_exerted_character_cannot_challenge():
     game_state.current_phase = game_state.current_phase.PLAY
     game_state.turn_number = 2  # Not first turn
     
-    engine = GameEngine(game_state)
+    engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # Try to challenge with exerted character - should fail
     challenge_result = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
@@ -279,7 +280,7 @@ def test_multiple_actions_in_sequence():
         player1.deck.append(deck_card)
         player2.deck.append(deck_card)
     
-    engine = GameEngine(game_state)
+    engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # Check initial legal actions - should include both quest and challenge for Helga
     legal_actions = engine.validator.get_all_legal_actions()
@@ -363,7 +364,7 @@ def test_rush_character_cannot_act_twice():
         player1.deck.append(deck_card)
         player2.deck.append(deck_card)
     
-    engine = GameEngine(game_state)
+    engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # Verify Rush character can challenge initially
     assert rush_char.has_rush_ability(), "Character should have Rush ability"
@@ -432,7 +433,7 @@ def test_fix_prevents_double_action_bug():
         player1.deck.append(deck_card)
         player2.deck.append(deck_card)
     
-    engine = GameEngine(game_state)
+    engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # Simulate the game loop that was causing the bug:
     # 1. Get legal actions (should include quest and challenge for Helga)
