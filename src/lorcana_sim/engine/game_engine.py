@@ -23,6 +23,7 @@ from .game_moves import GameMove, ActionMove, ChoiceMove, InkMove, PlayMove, Que
 from .action_queue import ActionQueue, ActionPriority, QueuedAction
 from .action_executor import ActionExecutor
 from .execution_engine import ExecutionEngine
+from .message_engine import MessageEngine
 from ..models.abilities.composable.conditional_effects import ActivationZone
 
 
@@ -46,7 +47,7 @@ class GameEngine:
         self.damage_calculator = DamageCalculator(game_state)
         self.choice_manager = GameChoiceManager()
         
-        # Message stream components (will move to MessageEngine later)
+        # Message stream components - legacy for compatibility during transition
         self.message_queue = deque()
         self.current_steps = deque()
         self.waiting_for_input = False
@@ -56,6 +57,10 @@ class GameEngine:
         self.execution_engine = ExecutionEngine(
             game_state, self.validator, self.event_manager, 
             self.damage_calculator, self.choice_manager, execution_mode, self.message_queue
+        )
+        self.message_engine = MessageEngine(
+            game_state, self.choice_manager, self.validator, self.execution_engine,
+            shared_message_queue=self.message_queue, shared_current_steps=self.current_steps
         )
         
         # Legacy components for compatibility
@@ -209,90 +214,19 @@ class GameEngine:
     
     
     def next_message(self, move: Optional[GameMove] = None) -> GameMessage:
-        """Get the next message in the game progression."""
-        # Process move if provided
-        if move and self.waiting_for_input:
-            self._process_move(move)
-            self.waiting_for_input = False
-            
-            # Evaluate conditional effects after move processing
-            self._evaluate_conditional_effects_after_move(move)
+        """Get the next message in the game progression - delegated to MessageEngine."""
+        # Sync state with message engine
+        self.message_engine.waiting_for_input = self.waiting_for_input
+        self.message_engine.current_choice = self.current_choice
         
-        # Return queued messages first
-        if self.message_queue:
-            message = self.message_queue.popleft()
-            # Apply deferred action if this message has one
-            if hasattr(message, 'deferred_action') and message.deferred_action:
-                # Apply the deferred effect now
-                try:
-                    result = message.deferred_action.effect.apply(message.deferred_action.target, message.deferred_action.context)
-                except Exception as e:
-                    print(f"DEBUG: Error applying deferred action: {e}")
-            return message
+        # Delegate to MessageEngine
+        result = self.message_engine.next_message(move, game_engine=self)
         
-        # Process pending actions from action queue (highest priority)
-        if self.execution_engine.action_queue.has_pending_actions():
-            message = self._process_next_queued_action()
-            if message:
-                return message
+        # Sync state back
+        self.waiting_for_input = self.message_engine.waiting_for_input
+        self.current_choice = self.message_engine.current_choice
         
-        # Execute next step if available
-        if self.current_steps:
-            message = self._execute_next_step()
-            
-            # Evaluate conditional effects after step execution
-            self._evaluate_conditional_effects_after_step()
-            
-            return message
-        
-        # Check for choices
-        if self.current_choice or self.is_paused_for_choice():
-            if not self.current_choice:
-                self.current_choice = self.get_current_choice()
-            
-            if self.current_choice:
-                self.waiting_for_input = True
-                return ChoiceRequiredMessage(
-                    type=MessageType.CHOICE_REQUIRED,
-                    player=self.current_choice.player,
-                    choice=self.current_choice,
-                    ability_source=getattr(self.current_choice, 'source', None)
-                )
-        
-        # Check game over
-        if self.game_state.is_game_over():
-            result, winner, game_over_data = self.game_state.get_game_result()
-            # Build reason string from game_over_data for backward compatibility
-            reason = ""
-            if game_over_data:
-                context = game_over_data.get('context', {})
-                result_type = context.get('result')
-                if result_type == 'lore_victory':
-                    winner_name = context.get('winner_name', 'Unknown')
-                    lore = context.get('lore', 0)
-                    reason = f"{winner_name} wins with {lore} lore!"
-                elif result_type == 'deck_exhaustion':
-                    winner_name = context.get('winner_name', 'Unknown')
-                    loser_name = context.get('loser_name', 'Unknown')
-                    reason = f"{winner_name} wins - {loser_name} ran out of cards!"
-                elif result_type == 'stalemate':
-                    reason = "Game ended in stalemate - both players unable to make progress"
-            
-            return GameOverMessage(
-                type=MessageType.GAME_OVER,
-                player=self.game_state.current_player,
-                winner=winner,
-                reason=reason
-            )
-        
-        # Need player action
-        self.waiting_for_input = True
-        return ActionRequiredMessage(
-            type=MessageType.ACTION_REQUIRED,
-            player=self.game_state.current_player,
-            phase=self.game_state.current_phase,
-            legal_actions=self._get_legal_actions()
-        )
+        return result
     
     
     def advance_step(self) -> Optional[GameStep]:
