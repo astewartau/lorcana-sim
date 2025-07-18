@@ -22,6 +22,7 @@ from .game_messages import (
 from .game_moves import GameMove, ActionMove, ChoiceMove, InkMove, PlayMove, QuestMove, ChallengeMove, SingMove, PassMove
 from .action_queue import ActionQueue, ActionPriority, QueuedAction
 from .action_executor import ActionExecutor
+from .execution_engine import ExecutionEngine
 
 
 class GameEngine:
@@ -29,28 +30,26 @@ class GameEngine:
     
     def __init__(self, game_state: GameState, execution_mode: ExecutionMode):
         self.game_state = game_state
+        
+        # Core managers (unchanged)
         self.validator = MoveValidator(game_state)
         self.event_manager = GameEventManager(game_state)
         self.damage_calculator = DamageCalculator(game_state)
         self.choice_manager = GameChoiceManager()
         
-        # Action executor for handling game actions
-        self.action_executor = ActionExecutor(
+        # Two main engines
+        self.execution_engine = ExecutionEngine(
             game_state, self.validator, self.event_manager, 
-            self.damage_calculator, self.choice_manager
+            self.damage_calculator, self.choice_manager, execution_mode
         )
         
-        # Step-by-step components (always enabled)
-        # Message stream components
+        # Message stream components (will move to MessageEngine later)
         self.message_queue = deque()
         self.current_steps = deque()
         self.waiting_for_input = False
         self.current_choice = None
         
-        # Action queue for atomic execution
-        self.action_queue = ActionQueue(self.event_manager)
-        
-        # Step-by-step components
+        # Legacy components for compatibility
         self.step_engine = StepProgressionEngine(execution_mode)
         self.input_manager = InputManager()
         self.snapshot_manager = SnapshotManager()
@@ -59,12 +58,6 @@ class GameEngine:
         self.event_manager.set_step_engine(self.step_engine)
         self._setup_step_listeners()
         self._setup_input_handlers()
-        
-        # Track current action being executed
-        self.current_action_steps: List[GameStep] = []
-        
-        # Conditional effect evaluation
-        self._condition_evaluator = None
         
         # Register all triggered abilities from characters currently in play
         self.event_manager.rebuild_listeners()
@@ -156,46 +149,9 @@ class GameEngine:
         
         # Don't call draw_step() - we already drew the card with events above
     
-    def _execute_action_direct(self, action, parameters: Dict[str, Any]) -> ActionResult:
-        """Execute a game action directly (internal use only)."""
-        # Convert string actions to GameAction enum if needed
-        if isinstance(action, str):
-            try:
-                action = GameAction(action)
-            except ValueError:
-                return ActionResult.failure_result(action, f"Unknown action: {action}")
-        
-        # Check if game is over
-        if self.game_state.is_game_over():
-            result, winner, reason = self.game_state.get_game_result()
-            return ActionResult.failure_result(action, f"Game is over: {reason}")
-        
-        # Validate action first
-        is_valid, message = self.validator.validate_action(action, parameters)
-        if not is_valid:
-            return ActionResult.failure_result(action, message)
-        
-        # Note: record_action is now handled inside each action method in ActionExecutor
-        
-        # Execute the action using the ActionExecutor
-        try:
-            # Adjust parameters for ActionExecutor format
-            if action == GameAction.SING_SONG:
-                # ActionExecutor expects 'character' and 'song' keys
-                adjusted_params = {
-                    'character': parameters.get('singer'),
-                    'song': parameters.get('song')
-                }
-                return self.action_executor.execute_action(action, adjusted_params)
-            else:
-                return self.action_executor.execute_action(action, parameters)
-        
-        except Exception as e:
-            return ActionResult.failure_result(action, f"Error executing action: {str(e)}")
-    
     def execute_action(self, action, parameters: Dict[str, Any]) -> ActionResult:
-        """Execute a game action directly (legacy compatibility)."""
-        return self._execute_action_direct(action, parameters)
+        """Execute a game action directly - delegates to ExecutionEngine."""
+        return self.execution_engine.execute_action(action, parameters)
     
     # Delegate action execution methods to maintain compatibility with any direct calls
     def _execute_set_step(self) -> ActionResult:
@@ -384,14 +340,10 @@ class GameEngine:
         self.input_manager.register_input_provider(player_id, provider)
     
     def force_evaluate_conditional_effects(self) -> None:
-        """Force evaluation of all conditional effects."""
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        events = self.condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            EvaluationTrigger.FORCE_EVALUATE
-        )
-        self._queue_conditional_effect_events(events)
+        """Force evaluation of all conditional effects - delegates to ExecutionEngine."""
+        events = self.execution_engine.force_evaluate_conditional_effects()
+        if events:
+            self._queue_conditional_effect_events(events)
     
     def trigger_event_with_choices_and_queue(self, event_context: EventContext) -> List[str]:
         """Trigger an event with choice manager and action queue included in the context."""
@@ -452,23 +404,23 @@ class GameEngine:
             
         if isinstance(move, ActionMove):
             # Break action into steps and queue them
-            steps = self._create_action_steps(move.action, move.parameters)
+            steps = self.execution_engine.process_move_as_steps(move)
             if steps:
                 self.current_steps.extend(steps)
             else:
                 # Fall back to direct execution if no steps created
-                result = self._execute_action_direct(move.action, move.parameters)
+                result = self.execution_engine.execute_action(move.action, move.parameters)
                 self._queue_result_message(result)
             
         elif isinstance(move, (InkMove, PlayMove, QuestMove, ChallengeMove, SingMove)):
-            # Convert specific moves to action moves
-            action_move = self._convert_to_action_move(move)
-            steps = self._create_action_steps(action_move.action, action_move.parameters)
+            # Convert specific moves to action moves and delegate to execution engine
+            steps = self.execution_engine.process_move_as_steps(move)
             if steps:
                 self.current_steps.extend(steps)
             else:
                 # Fall back to direct execution if no steps created
-                result = self._execute_action_direct(action_move.action, action_move.parameters)
+                action_move = self.execution_engine._convert_to_action_move(move)
+                result = self.execution_engine.execute_action(action_move.action, action_move.parameters)
                 self._queue_result_message(result)
             
         elif isinstance(move, PassMove):
@@ -491,7 +443,7 @@ class GameEngine:
                 # Clear the flag
                 delattr(self.game_state, '_needs_ready_step')
             
-            result = self._execute_action_direct(GameAction.PROGRESS, {})
+            result = self.execution_engine.execute_action(GameAction.PROGRESS, {})
             self._queue_result_message(result)
             
         elif isinstance(move, ChoiceMove):
@@ -499,64 +451,9 @@ class GameEngine:
             self._resolve_choice(move.choice_id, move.option)
             self.current_choice = None
     
-    def _convert_to_action_move(self, move: GameMove) -> ActionMove:
-        """Convert specific move types to generic action moves."""
-        if isinstance(move, InkMove):
-            return ActionMove(GameAction.PLAY_INK, {'card': move.card})
-        elif isinstance(move, PlayMove):
-            if isinstance(move.card, CharacterCard):
-                return ActionMove(GameAction.PLAY_CHARACTER, {'card': move.card})
-            elif isinstance(move.card, ActionCard):
-                return ActionMove(GameAction.PLAY_ACTION, {'card': move.card})
-            elif isinstance(move.card, ItemCard):
-                return ActionMove(GameAction.PLAY_ITEM, {'card': move.card})
-        elif isinstance(move, QuestMove):
-            return ActionMove(GameAction.QUEST_CHARACTER, {'character': move.character})
-        elif isinstance(move, ChallengeMove):
-            return ActionMove(GameAction.CHALLENGE_CHARACTER, {'attacker': move.attacker, 'defender': move.defender})
-        elif isinstance(move, SingMove):
-            return ActionMove(GameAction.SING_SONG, {'singer': move.singer, 'song': move.song})
-        
-        raise ValueError(f"Cannot convert move type: {type(move)}")
-    
-    def _create_action_steps(self, action: GameAction, parameters: Dict[str, Any]) -> List[GameStep]:
-        """Create steps for a game action."""
-        # For now, disable step creation to use clean direct execution
-        # This ensures all actions use the new clean messaging format
-        return []
-    
     def _execute_next_step(self) -> StepExecutedMessage:
-        """Execute the next step and return message."""
-            
-        step = self.current_steps.popleft()
-        
-        try:
-            result = step.execute_fn()
-            step.status = StepStatus.COMPLETED
-            step.result = result
-            
-            # Check if step triggered a choice
-            if self.is_paused_for_choice():
-                self.current_choice = self.get_current_choice()
-            
-            return StepExecutedMessage(
-                type=MessageType.STEP_EXECUTED,
-                player=self.game_state.current_player,
-                step_id=step.step_id,
-                description=step.description,
-                result=str(result) if result else "Completed"
-            )
-            
-        except Exception as e:
-            step.status = StepStatus.CANCELLED
-            step.error = str(e)
-            return StepExecutedMessage(
-                type=MessageType.STEP_EXECUTED,
-                player=self.game_state.current_player,
-                step_id=step.step_id,
-                description=step.description,
-                result=f"Error: {str(e)}"
-            )
+        """Execute the next step and return message - delegates to ExecutionEngine."""
+        return self.execution_engine.execute_next_step()
     
     def _process_next_queued_action(self) -> Optional[GameMessage]:
         """Process the next action from the action queue and return a message."""
@@ -1000,64 +897,29 @@ class GameEngine:
         self.step_engine.register_input_handler(StepType.CONFIRMATION, handle_confirmation_input)
     
     # Conditional Effect Evaluation Methods
-    @property
-    def condition_evaluator(self):
-        """Get or create the condition evaluator instance."""
-            
-        if self._condition_evaluator is None:
-            from ..models.abilities.composable.condition_evaluator import ConditionEvaluator
-            self._condition_evaluator = ConditionEvaluator()
-        return self._condition_evaluator
-    
     def _evaluate_conditional_effects_after_move(self, move: GameMove) -> None:
-        """Evaluate conditional effects after a move is processed."""
-            
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        # Determine trigger type based on move
-        trigger = EvaluationTrigger.STEP_EXECUTED
-        if isinstance(move, PlayMove):
-            trigger = EvaluationTrigger.CARD_PLAYED
-        elif isinstance(move, PassMove):
-            # Check if this caused a phase or turn change
-            trigger = EvaluationTrigger.PHASE_CHANGE
-        
-        # Evaluate and queue any events
-        events = self.condition_evaluator.evaluate_all_conditions(self.game_state, trigger)
-        self._queue_conditional_effect_events(events)
+        """Evaluate conditional effects after a move is processed - delegates to ExecutionEngine."""
+        events = self.execution_engine._evaluate_conditional_effects_after_move(move)
+        if events:
+            self._queue_conditional_effect_events(events)
     
     def _evaluate_conditional_effects_after_step(self) -> None:
-        """Evaluate conditional effects after a step is executed."""
-            
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        events = self.condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            EvaluationTrigger.STEP_EXECUTED
-        )
-        self._queue_conditional_effect_events(events)
+        """Evaluate conditional effects after a step is executed - delegates to ExecutionEngine."""
+        events = self.execution_engine._evaluate_conditional_effects_after_step()
+        if events:
+            self._queue_conditional_effect_events(events)
     
     def _evaluate_conditional_effects_on_turn_change(self) -> None:
-        """Evaluate conditional effects when turn changes."""
-            
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        events = self.condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            EvaluationTrigger.TURN_CHANGE
-        )
-        self._queue_conditional_effect_events(events)
+        """Evaluate conditional effects when turn changes - delegates to ExecutionEngine."""
+        events = self.execution_engine._evaluate_conditional_effects_on_turn_change()
+        if events:
+            self._queue_conditional_effect_events(events)
     
     def _evaluate_conditional_effects_on_phase_change(self) -> None:
-        """Evaluate conditional effects when phase changes."""
-            
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        events = self.condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            EvaluationTrigger.PHASE_CHANGE
-        )
-        self._queue_conditional_effect_events(events)
+        """Evaluate conditional effects when phase changes - delegates to ExecutionEngine."""
+        events = self.execution_engine._evaluate_conditional_effects_on_phase_change()
+        if events:
+            self._queue_conditional_effect_events(events)
     
     def _queue_conditional_effect_events(self, events: List[Dict]) -> None:
         """Queue conditional effect events as messages."""
