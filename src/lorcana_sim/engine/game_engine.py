@@ -24,6 +24,7 @@ from .action_queue import ActionQueue, ActionPriority, QueuedAction
 from .action_executor import ActionExecutor
 from .execution_engine import ExecutionEngine
 from .message_engine import MessageEngine
+from .choice_engine import ChoiceEngine
 from ..models.abilities.composable.conditional_effects import ActivationZone
 
 
@@ -53,7 +54,7 @@ class GameEngine:
         self.waiting_for_input = False
         self.current_choice = None
         
-        # Two main engines
+        # Three specialized engines
         self.execution_engine = ExecutionEngine(
             game_state, self.validator, self.event_manager, 
             self.damage_calculator, self.choice_manager, execution_mode, self.message_queue
@@ -62,6 +63,7 @@ class GameEngine:
             game_state, self.choice_manager, self.validator, self.execution_engine,
             shared_message_queue=self.message_queue, shared_current_steps=self.current_steps
         )
+        self.choice_engine = ChoiceEngine(game_state, self.choice_manager)
         
         # Legacy components for compatibility
         self.step_engine = StepProgressionEngine(execution_mode)
@@ -719,93 +721,8 @@ class GameEngine:
             
             # Queue messages for each expired effect
             for effect in expired_effects:
-                self._queue_choice_event_message(effect)
+                self.choice_engine.queue_choice_event_message(effect, self.message_queue)
     
-    def _queue_choice_event_message(self, event: dict) -> None:
-        """Queue a message for a choice-triggered event."""
-            
-        event_type = event.get('type')
-        player_name = event.get('player', 'Unknown')
-        
-        # Handle both enum objects and string values
-        event_type_str = event_type.value if hasattr(event_type, 'value') else str(event_type)
-        
-        if event_type_str == 'card_drawn':
-            # Get player object - use current player if name matches, otherwise look up
-            player = None
-            if player_name == self.game_state.current_player.name:
-                player = self.game_state.current_player
-            elif player_name == self.game_state.players[0].name:
-                player = self.game_state.players[0]
-            elif player_name == self.game_state.players[1].name:
-                player = self.game_state.players[1]
-            
-            # Queue draw event messages for choice-triggered draws
-            cards_drawn = event.get('cards_drawn', [])
-            for card in cards_drawn:
-                draw_message = StepExecutedMessage(
-                    type=MessageType.STEP_EXECUTED,
-                    player=self.game_state.current_player,
-                    step=GameEvent.CARD_DRAWN,
-                    event_data=create_event_data(
-                        GameEvent.CARD_DRAWN,
-                        player=player,
-                        card=card
-                    )
-                )
-                self.message_queue.append(draw_message)
-        elif event_type_str == 'card_discarded':
-            # Get player object - use current player if name matches, otherwise look up
-            player = None
-            if player_name == self.game_state.current_player.name:
-                player = self.game_state.current_player
-            elif player_name == self.game_state.players[0].name:
-                player = self.game_state.players[0]
-            elif player_name == self.game_state.players[1].name:
-                player = self.game_state.players[1]
-                
-            # Queue discard event messages for choice-triggered discards
-            card = event.get('additional_data', {}).get('card')  # Try to get whole card object
-            from_zone = event.get('additional_data', {}).get('from_zone', ActivationZone.HAND)  # Default to hand
-            to_zone = ActivationZone.DISCARD  # Discarding always goes to discard pile
-            discard_message = StepExecutedMessage(
-                type=MessageType.STEP_EXECUTED,
-                player=self.game_state.current_player,
-                step=GameEvent.CARD_DISCARDED,
-                event_data=create_event_data(
-                    GameEvent.CARD_DISCARDED,
-                    player=player,
-                    card=card,
-                    from_zone=from_zone,
-                    to_zone=to_zone
-                )
-            )
-            self.message_queue.append(discard_message)
-        elif event_type_str == 'lore_gained':
-            # Get player object - use current player if name matches, otherwise look up
-            player = None
-            if player_name == self.game_state.current_player.name:
-                player = self.game_state.current_player
-            elif player_name == self.game_state.players[0].name:
-                player = self.game_state.players[0]
-            elif player_name == self.game_state.players[1].name:
-                player = self.game_state.players[1]
-                
-            # Queue lore gain event messages for choice-triggered lore gains
-            lore_amount = event.get('additional_data', {}).get('lore_amount', 0)
-            source = event.get('additional_data', {}).get('source')  # Source that caused the lore gain
-            lore_message = StepExecutedMessage(
-                type=MessageType.STEP_EXECUTED,
-                player=self.game_state.current_player,
-                step=GameEvent.LORE_GAINED,
-                event_data=create_event_data(
-                    GameEvent.LORE_GAINED,
-                    player=player,
-                    amount=lore_amount,
-                    source=source
-                )
-            )
-            self.message_queue.append(lore_message)
     
     def _get_legal_actions(self) -> List[LegalAction]:
         """Get legal actions formatted for messages."""
