@@ -27,6 +27,7 @@ from src.lorcana_sim.engine.game_moves import (
     SingMove, ChoiceMove, PassMove
 )
 from src.lorcana_sim.loaders.deck_loader import DeckLoader
+from src.lorcana_sim.models.abilities.composable.conditional_effects import ActivationZone
 
 
 def setup_game():
@@ -308,9 +309,8 @@ def handle_choice_message(message: ChoiceRequiredMessage) -> ChoiceMove:
 
 def display_step_message(message: StepExecutedMessage):
     """Display a step execution message in a user-friendly format."""
-    # Extract action type from step_id for better formatting
-    step_id = message.step_id
-    description = message.description
+    # Extract action type from step for better formatting
+    step = message.step
     
     # Handle new event_data structure if present
     if hasattr(message, 'event_data') and message.event_data and isinstance(message.event_data, dict):
@@ -335,12 +335,64 @@ def display_step_message(message: StepExecutedMessage):
             return
             
         elif event == GameEvent.CARD_DRAWN:
-            player_name = context.get('player_name', 'Unknown Player')
-            if context.get('draw_failed'):
-                print(f"📚 {player_name} attempted to draw but deck is empty")
-            else:
-                card_name = context.get('card_name', 'Unknown Card')
+            # Handle both old and new event_data structure
+            player = context.get('player')
+            card = context.get('card')
+            
+            if player and card:
+                # New structure with whole objects
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                card_name = card.name if hasattr(card, 'name') else str(card)
                 print(f"📚 {player_name} drew {card_name}")
+            else:
+                # Fallback to old structure
+                player_name = context.get('player_name', 'Unknown Player')
+                if context.get('draw_failed'):
+                    print(f"📚 {player_name} attempted to draw but deck is empty")
+                else:
+                    card_name = context.get('card_name', 'Unknown Card')
+                    print(f"📚 {player_name} drew {card_name}")
+            return
+            
+        elif event == GameEvent.LORE_GAINED:
+            player = context.get('player')
+            amount = context.get('amount', 0)
+            source = context.get('source')
+            
+            if player:
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                if source and hasattr(source, 'name'):
+                    print(f"⭐ {player_name} gained {amount} lore from {source.name} → {player.lore} total")
+                else:
+                    print(f"⭐ {player_name} gained {amount} lore → {player.lore} total")
+            return
+            
+        elif event == GameEvent.CARD_DISCARDED:
+            player = context.get('player')
+            card = context.get('card')
+            from_zone = context.get('from_zone')
+            to_zone = context.get('to_zone')
+            
+            if player and card:
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                card_name = card.name if hasattr(card, 'name') else str(card)
+                from_zone_str = from_zone.value if hasattr(from_zone, 'value') else str(from_zone)
+                to_zone_str = to_zone.value if hasattr(to_zone, 'value') else str(to_zone)
+                print(f"🗑️ {player_name} discarded {card_name} ({from_zone_str} → {to_zone_str})")
+            return
+            
+        elif event == GameEvent.ABILITY_TRIGGERED:
+            character = context.get('character')
+            ability_name = context.get('ability_name', 'Unknown Ability')
+            effect_type = context.get('effect_type', 'effect')
+            amount = context.get('amount', 0)
+            
+            if character:
+                char_name = character.name if hasattr(character, 'name') else str(character)
+                if effect_type == "challenger_bonus":
+                    print(f"⚔️ {char_name} gained Challenger +{amount} from {ability_name}")
+                else:
+                    print(f"✨ {char_name} triggered {ability_name}")
             return
             
         elif event == GameEvent.DRAW_STEP:
@@ -428,7 +480,7 @@ def display_step_message(message: StepExecutedMessage):
             return
     
     # Handle conditional effects with structured data
-    if step_id == "conditional_effect_applied" and hasattr(message, 'event_data'):
+    if step == "conditional_effect_applied" and hasattr(message, 'event_data'):
         event_data = message.event_data
         source = event_data.get('source', 'Unknown')
         ability_name = event_data.get('ability_name', 'Unknown Ability')
@@ -444,7 +496,7 @@ def display_step_message(message: StepExecutedMessage):
         print(description)
         return
         
-    elif step_id == "conditional_effect_removed" and hasattr(message, 'event_data'):
+    elif step == "conditional_effect_removed" and hasattr(message, 'event_data'):
         event_data = message.event_data
         source = event_data.get('source', 'Unknown')
         ability_name = event_data.get('ability_name', 'Unknown Ability')
@@ -459,40 +511,42 @@ def display_step_message(message: StepExecutedMessage):
         print(description)
         return
     
-    elif "ability_triggered" in step_id.lower():
-        print(f"✨ {description}")
-    elif "character_readied" in step_id.lower() or "readied" in description:
-        print(f"🔄 {description}")
-    elif step_id == "card_drawn":
+    # Handle step-based display when no structured event_data is available
+    if step and hasattr(step, 'value'):
+        step_str = step.value.lower()
+    elif step:
+        step_str = str(step).lower()
+    else:
+        step_str = ""
+        
+    if "ability_triggered" in step_str:
+        print(f"✨ Ability triggered")
+    elif "character_readied" in step_str or "readied" in step_str:
+        print(f"🔄 Character readied")
+    elif step_str == "card_drawn":
         # Already handled by structured event_data above
         return
-    elif "ink dried" in description:
-        print(f"💧 {description}")
-    elif "ink" in step_id.lower() or description.startswith("Inked"):
-        print(f"🔮 {description}")
-    elif "play" in step_id.lower() or "Played" in description:
-        print(f"🎭 {description}")
-    elif "quest" in step_id.lower() or "quested" in description:
-        print(f"🏆 {description}")
-    elif "challenge" in step_id.lower() or "challenged" in description:
-        print(f"⚔️  {description}")
-    elif "character_banished" in step_id.lower() or "was banished" in description:
-        print(f"💀 {description}")
-    elif "card_discarded" in step_id.lower() or "discarded" in description:
-        print(f"🗑️  {description}")
-    elif "lore_gained" in step_id.lower() or "gained" in description and "lore" in description:
-        print(f"⭐ {description}")
-    elif "phase" in step_id.lower() or "Advanced" in description:
-        print(f"⚙️  {description}")
-    elif "turn_ended" in step_id.lower() or "Turn ended" in description:
-        # Turn transitions now use the same format as phase transitions
-        if " → " in description and "phase" in description:
-            print(f"⚙️  {description}")
-        else:
-            print(f"🔄 {description}")
+    elif "ink" in step_str:
+        print(f"🔮 Ink action")
+    elif "play" in step_str:
+        print(f"🎭 Card played")
+    elif "quest" in step_str:
+        print(f"🏆 Character quested")
+    elif "challenge" in step_str:
+        print(f"⚔️ Character challenged")
+    elif "character_banished" in step_str:
+        print(f"💀 Character banished")
+    elif "card_discarded" in step_str:
+        print(f"🗑️ Card discarded")
+    elif "lore_gained" in step_str:
+        print(f"⭐ Lore gained")
+    elif "phase" in step_str:
+        print(f"⚙️ Phase change")
+    elif "turn_ended" in step_str:
+        print(f"🔄 Turn ended")
     else:
         # Generic step display
-        print(f"📋 {description}")
+        print(f"📋 Game step: {step}")
 
 
 def simulate_random_game():
@@ -559,7 +613,7 @@ def simulate_random_game():
 
         else:
             # Handle any other message types (e.g., info messages)
-            print(f"ℹ️  {message.description}")
+            print(f"ℹ️  {message}")
         
         # Get next message for next iteration
         message = engine.next_message()

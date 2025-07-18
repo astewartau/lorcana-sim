@@ -49,9 +49,7 @@ class ChoiceRequiredMessage(GameMessage):
 @dataclass
 class StepExecutedMessage(GameMessage):
     """Message indicating a game step was executed."""
-    step_id: str = ""
-    description: str = ""
-    result: str = ""
+    step: Optional[Any] = None  # GameEvent enum object (not .value)
     deferred_action: Optional[Any] = None  # Store action to apply when message is fetched
     event_data: Optional[Dict[str, Any]] = None  # Raw event data with GameEvent enum and context
 

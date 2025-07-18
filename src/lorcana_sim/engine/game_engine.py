@@ -23,6 +23,15 @@ from .game_moves import GameMove, ActionMove, ChoiceMove, InkMove, PlayMove, Que
 from .action_queue import ActionQueue, ActionPriority, QueuedAction
 from .action_executor import ActionExecutor
 from .execution_engine import ExecutionEngine
+from ..models.abilities.composable.conditional_effects import ActivationZone
+
+
+def create_event_data(event: GameEvent, **context) -> Dict[str, Any]:
+    """Create standardized event_data structure."""
+    return {
+        'event': event,
+        'context': context
+    }
 
 
 class GameEngine:
@@ -350,16 +359,27 @@ class GameEngine:
         player_name = event.get('player', 'Unknown')
         
         if event_type == 'card_drawn':
+            # Get player object - use current player if name matches, otherwise look up
+            player = None
+            if player_name == self.game_state.current_player.name:
+                player = self.game_state.current_player
+            elif player_name == self.game_state.players[0].name:
+                player = self.game_state.players[0]
+            elif player_name == self.game_state.players[1].name:
+                player = self.game_state.players[1]
+            
             # Queue draw event message
             cards_drawn = event.get('cards_drawn', [])
             for card in cards_drawn:
-                card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
                 draw_message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
                     player=self.game_state.current_player,
-                    step_id=f"card_drawn_{card_name}",
-                    description=f"📚 {player_name} drew {card_name}",
-                    result="Drew"
+                    step=GameEvent.CARD_DRAWN,
+                    event_data=create_event_data(
+                        GameEvent.CARD_DRAWN,
+                        player=player,
+                        card=card
+                    )
                 )
                 self.message_queue.append(draw_message)
     
@@ -376,9 +396,14 @@ class GameEngine:
                         ability_message = StepExecutedMessage(
                             type=MessageType.STEP_EXECUTED,
                             player=current_player,
-                            step_id=f"heavily_armed_trigger",
-                            description=f"⚔️ {character.name} gained Challenger +{amount} from HEAVILY ARMED",
-                            result="Activated"
+                            step=GameEvent.ABILITY_TRIGGERED,
+                            event_data=create_event_data(
+                                GameEvent.ABILITY_TRIGGERED,
+                                character=character,
+                                ability_name="HEAVILY ARMED",
+                                effect_type="challenger_bonus",
+                                amount=amount
+                            )
                         )
                         self.message_queue.append(ability_message)
                         break
@@ -418,9 +443,7 @@ class GameEngine:
                     ready_message = StepExecutedMessage(
                             type=MessageType.STEP_EXECUTED,
                             player=self.game_state.current_player,
-                            step_id=f"character_readied",
-                            description="Character readied",  # Generic description
-                            result="Readied",
+                            step=GameEvent.CHARACTER_READIED,
                             event_data=readied_item  # Pass the full event data
                     )
                     self.message_queue.append(ready_message)
@@ -465,9 +488,7 @@ class GameEngine:
             message = StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
                 player=self.game_state.current_player,
-                step_id=f"action_{result.action_id}",
-                description=description,
-                result="Completed",
+                step=f"action_{result.action_id}",
                 deferred_action=result.queued_action  # Store the action for later execution
             )
             # Add structured effect data for UI formatting
@@ -478,9 +499,7 @@ class GameEngine:
             return StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
                 player=self.game_state.current_player,
-                step_id=f"action_{result.action_id}_error",
-                description=f"Action failed: {result.error}",
-                result="Failed"
+                step=f"action_{result.action_id}_error",
             )
     
     def _extract_effect_data(self, executed_action, result) -> dict:
@@ -605,10 +624,9 @@ class GameEngine:
                     description = f"Played {char_name} ({cost} ink) → {ink_after}/{total_ink} ink"
                 elif result_type == "character_quested":
                     character = result.data.get('character') if result.data else None
-                    char_name = character.name if character and hasattr(character, 'name') else 'character'
                     lore = result.data.get('lore_gained', 0) if result.data else 0
-                    lore_after = result.data.get('lore_after', 0) if result.data else 0
-                    description = f"{char_name} quested for {lore} lore → {lore_after} total"
+                    # For questing, the source is the character that quested
+                    description = ""  # Will be handled by event_data
                 elif result_type == "character_challenged":
                     attacker = result.data.get('attacker') if result.data else None
                     defender = result.data.get('defender') if result.data else None
@@ -647,13 +665,27 @@ class GameEngine:
                 else:
                     description = result_type.replace('_', ' ').title()
             
-            message = StepExecutedMessage(
-                type=MessageType.STEP_EXECUTED,
-                player=self.game_state.current_player,
-                step_id=f"action_{result.result_type.value if hasattr(result, 'result_type') else 'unknown'}",
-                description=description,
-                result="Completed"
-            )
+            # Special handling for character_quested to use structured event_data
+            if hasattr(result, 'result_type') and result.result_type.value == "character_quested":
+                character = result.data.get('character') if result.data else None
+                lore = result.data.get('lore_gained', 0) if result.data else 0
+                message = StepExecutedMessage(
+                    type=MessageType.STEP_EXECUTED,
+                    player=self.game_state.current_player,
+                    step=GameEvent.LORE_GAINED,
+                    event_data=create_event_data(
+                        GameEvent.LORE_GAINED,
+                        player=character.controller if character and hasattr(character, 'controller') else self.game_state.current_player,
+                        amount=lore,
+                        source=character
+                    )
+                )
+            else:
+                message = StepExecutedMessage(
+                    type=MessageType.STEP_EXECUTED,
+                    player=self.game_state.current_player,
+                    step=f"action_{result.result_type.value if hasattr(result, 'result_type') else 'unknown'}",
+                )
             self.message_queue.append(message)
             
             # Check for zone events (conditional effect activations) and queue them as separate messages
@@ -667,9 +699,7 @@ class GameEngine:
                         zone_message = StepExecutedMessage(
                             type=MessageType.STEP_EXECUTED,
                             player=self.game_state.current_player,
-                            step_id=GameEventType.CONDITIONAL_EFFECT_APPLIED.value,
-                            description="",  # No description - let display layer handle it
-                            result="Applied"
+                            step=GameEventType.CONDITIONAL_EFFECT_APPLIED,
                         )
                         # Store the raw event data
                         zone_message.event_data = zone_event
@@ -681,9 +711,7 @@ class GameEngine:
                         zone_message = StepExecutedMessage(
                             type=MessageType.STEP_EXECUTED,
                             player=self.game_state.current_player,
-                            step_id=GameEventType.CONDITIONAL_EFFECT_REMOVED.value,
-                            description="",  # No description - let display layer handle it
-                            result="Removed"
+                            step=GameEventType.CONDITIONAL_EFFECT_REMOVED,
                         )
                         # Store the raw event data
                         zone_message.event_data = zone_event
@@ -769,39 +797,79 @@ class GameEngine:
         event_type_str = event_type.value if hasattr(event_type, 'value') else str(event_type)
         
         if event_type_str == 'card_drawn':
+            # Get player object - use current player if name matches, otherwise look up
+            player = None
+            if player_name == self.game_state.current_player.name:
+                player = self.game_state.current_player
+            elif player_name == self.game_state.players[0].name:
+                player = self.game_state.players[0]
+            elif player_name == self.game_state.players[1].name:
+                player = self.game_state.players[1]
+            
             # Queue draw event messages for choice-triggered draws
             cards_drawn = event.get('cards_drawn', [])
             for card in cards_drawn:
-                card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
                 draw_message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
                     player=self.game_state.current_player,
-                    step_id=f"card_drawn",
-                    description=f"{player_name} drew {card_name}",
-                    result="Drew"
+                    step=GameEvent.CARD_DRAWN,
+                    event_data=create_event_data(
+                        GameEvent.CARD_DRAWN,
+                        player=player,
+                        card=card
+                    )
                 )
                 self.message_queue.append(draw_message)
         elif event_type_str == 'card_discarded':
+            # Get player object - use current player if name matches, otherwise look up
+            player = None
+            if player_name == self.game_state.current_player.name:
+                player = self.game_state.current_player
+            elif player_name == self.game_state.players[0].name:
+                player = self.game_state.players[0]
+            elif player_name == self.game_state.players[1].name:
+                player = self.game_state.players[1]
+                
             # Queue discard event messages for choice-triggered discards
-            card_name = event.get('additional_data', {}).get('card_name', 'Unknown Card')
+            card = event.get('additional_data', {}).get('card')  # Try to get whole card object
+            from_zone = event.get('additional_data', {}).get('from_zone', ActivationZone.HAND)  # Default to hand
+            to_zone = ActivationZone.DISCARD  # Discarding always goes to discard pile
             discard_message = StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
                 player=self.game_state.current_player,
-                step_id=f"card_discarded",
-                description=f"{player_name} discarded {card_name}",
-                result="Discarded"
+                step=GameEvent.CARD_DISCARDED,
+                event_data=create_event_data(
+                    GameEvent.CARD_DISCARDED,
+                    player=player,
+                    card=card,
+                    from_zone=from_zone,
+                    to_zone=to_zone
+                )
             )
             self.message_queue.append(discard_message)
         elif event_type_str == 'lore_gained':
+            # Get player object - use current player if name matches, otherwise look up
+            player = None
+            if player_name == self.game_state.current_player.name:
+                player = self.game_state.current_player
+            elif player_name == self.game_state.players[0].name:
+                player = self.game_state.players[0]
+            elif player_name == self.game_state.players[1].name:
+                player = self.game_state.players[1]
+                
             # Queue lore gain event messages for choice-triggered lore gains
             lore_amount = event.get('additional_data', {}).get('lore_amount', 0)
-            lore_after = event.get('additional_data', {}).get('lore_after', 0)
+            source = event.get('additional_data', {}).get('source')  # Source that caused the lore gain
             lore_message = StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
                 player=self.game_state.current_player,
-                step_id=f"lore_gained",
-                description=f"{player_name} gained {lore_amount} lore → {lore_after} total",
-                result="Gained"
+                step=GameEvent.LORE_GAINED,
+                event_data=create_event_data(
+                    GameEvent.LORE_GAINED,
+                    player=player,
+                    amount=lore_amount,
+                    source=source
+                )
             )
             self.message_queue.append(lore_message)
     
@@ -917,9 +985,7 @@ class GameEngine:
                 message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
                     player=self.game_state.current_player,
-                    step_id=GameEventType.CONDITIONAL_EFFECT_APPLIED.value,
-                    description="",  # No description - let display layer handle it
-                    result="Applied"
+                    step=GameEventType.CONDITIONAL_EFFECT_APPLIED,
                 )
                 # Store the raw event data for proper formatting
                 message.event_data = event
@@ -932,9 +998,7 @@ class GameEngine:
                 message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
                     player=self.game_state.current_player,
-                    step_id=GameEventType.CONDITIONAL_EFFECT_REMOVED.value,
-                    description="",  # No description - let display layer handle it
-                    result="Removed"
+                    step=GameEventType.CONDITIONAL_EFFECT_REMOVED,
                 )
                 # Store the raw event data for proper formatting
                 message.event_data = event
@@ -947,7 +1011,7 @@ class GameEngine:
                 message = StepExecutedMessage(
                     type=MessageType.STEP_EXECUTED,
                     player=self.game_state.current_player,
-                    step_id=f"conditional_effect_{event_type.lower()}",
+                    step=f"conditional_effect_{event_type.lower()}",
                     description=description,
                     result="Applied" if "APPLIED" in event_type else "Removed"
                 )

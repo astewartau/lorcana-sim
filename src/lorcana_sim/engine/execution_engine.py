@@ -16,6 +16,7 @@ from .action_queue import ActionQueue
 from .action_executor import ActionExecutor
 from .game_moves import GameMove, ActionMove, InkMove, PlayMove, QuestMove, ChallengeMove, SingMove
 from .game_messages import StepExecutedMessage, MessageType
+from ..models.abilities.composable.conditional_effects import ActivationZone
 
 
 class ExecutionEngine:
@@ -168,9 +169,7 @@ class ExecutionEngine:
         return StepExecutedMessage(
             type=MessageType.STEP_EXECUTED,
             player=self.game_state.current_player,
-            step_id="placeholder",
-            description="Step executed",
-            result="Success"
+            step="placeholder"
         )
     
     def _evaluate_conditional_effects_after_move(self, move: GameMove) -> None:
@@ -234,19 +233,24 @@ class ExecutionEngine:
                 cards_drawn = event.get('cards_drawn', [])
                 player_name = event.get('player', 'Unknown')
                 
+                # Get player object - use current player if name matches, otherwise look up
+                player = None
+                if player_name == self.game_state.current_player.name:
+                    player = self.game_state.current_player
+                elif player_name == self.game_state.players[0].name:
+                    player = self.game_state.players[0]
+                elif player_name == self.game_state.players[1].name:
+                    player = self.game_state.players[1]
+                
                 for card in cards_drawn:
-                    card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
                     draw_message = StepExecutedMessage(
                         type=MessageType.STEP_EXECUTED,
                         player=self.game_state.current_player,
-                        step_id="card_drawn",
-                        description=f"{player_name} drew {card_name}",
-                        result="Drew",
+                        step=GameEvent.CARD_DRAWN,
                         event_data={
                             'event': GameEvent.CARD_DRAWN,
                             'context': {
-                                'player_name': player_name,
-                                'card_name': card_name,
+                                'player': player,
                                 'card': card
                             }
                         }

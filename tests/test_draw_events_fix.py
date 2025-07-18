@@ -7,6 +7,7 @@ from lorcana_sim.models.game.player import Player
 from lorcana_sim.models.cards.character_card import CharacterCard
 from lorcana_sim.models.cards.base_card import CardColor, Rarity
 from lorcana_sim.engine.step_system import ExecutionMode
+from lorcana_sim.engine.event_system import GameEvent
 
 
 class TestDrawEventsFix:
@@ -127,9 +128,15 @@ class TestDrawEventsFix:
         
         # Draw message should be queued
         draw_messages = [msg for msg in self.game_engine.message_queue 
-                        if "drew" in msg.description]
+                        if (hasattr(msg, 'event_data') and msg.event_data and 
+                           msg.event_data.get('event') == GameEvent.CARD_DRAWN)]
         assert len(draw_messages) == 1
-        assert "Bob drew" in draw_messages[0].description
+        
+        # Check event_data structure
+        draw_msg = draw_messages[0]
+        assert draw_msg.event_data['event'] == GameEvent.CARD_DRAWN
+        assert draw_msg.event_data['context']['player'].name == 'Bob'
+        assert hasattr(draw_msg.event_data['context']['card'], 'name')
     
     def test_player_draws_on_second_turn(self):
         """Test that first player draws on their second turn."""
@@ -169,9 +176,15 @@ class TestDrawEventsFix:
         
         # Draw message should be queued
         draw_messages = [msg for msg in self.game_engine.message_queue 
-                        if "drew" in msg.description]
+                        if (hasattr(msg, 'event_data') and msg.event_data and 
+                           msg.event_data.get('event') == GameEvent.CARD_DRAWN)]
         assert len(draw_messages) == 1
-        assert "Alice drew" in draw_messages[0].description
+        
+        # Check event_data structure
+        draw_msg = draw_messages[0]
+        assert draw_msg.event_data['event'] == GameEvent.CARD_DRAWN
+        assert draw_msg.event_data['context']['player'].name == 'Alice'
+        assert hasattr(draw_msg.event_data['context']['card'], 'name')
     
     def test_set_last_event_method_exists(self):
         """Test that the set_last_event method exists and works."""
