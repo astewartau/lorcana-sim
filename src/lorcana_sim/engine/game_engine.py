@@ -238,7 +238,7 @@ class GameEngine:
             return message
         
         # Process pending actions from action queue (highest priority)
-        if self.action_queue.has_pending_actions():
+        if self.execution_engine.action_queue.has_pending_actions():
             message = self._process_next_queued_action()
             if message:
                 return message
@@ -351,7 +351,7 @@ class GameEngine:
         if not event_context.additional_data:
             event_context.additional_data = {}
         event_context.additional_data['choice_manager'] = self.choice_manager
-        event_context.additional_data['action_queue'] = self.action_queue
+        event_context.additional_data['action_queue'] = self.execution_engine.action_queue
         
         return self.event_manager.trigger_event(event_context)
     
@@ -458,7 +458,7 @@ class GameEngine:
     def _process_next_queued_action(self) -> Optional[GameMessage]:
         """Process the next action from the action queue and return a message."""
             
-        result = self.action_queue.process_next_action()
+        result = self.execution_engine.action_queue.process_next_action()
         if not result:
             return None
         
@@ -730,7 +730,7 @@ class GameEngine:
             if self.choice_manager.current_choice:
                 context = self.choice_manager.current_choice.trigger_context.get('_choice_execution_context', {})
                 context['game_state'] = self.game_state
-                context['action_queue'] = self.action_queue  # Add action queue for deferred execution
+                context['action_queue'] = self.execution_engine.action_queue  # Add action queue for deferred execution
                 self.choice_manager.current_choice.trigger_context['_choice_execution_context'] = context
                 
             return original_provide_choice(choice_id, selected_option)
@@ -748,11 +748,11 @@ class GameEngine:
             raise ValueError(f"Failed to resolve choice {choice_id} with option {option}")
         
         # After choice resolution, check if actions were queued and need to be processed
-        if self.action_queue.has_pending_actions():
+        if self.execution_engine.action_queue.has_pending_actions():
             # Process actions but DON'T apply effects yet - just prepare messages
             # Process ALL actions at once to ensure composite effects are fully split
-            while self.action_queue.has_pending_actions():
-                result = self.action_queue.process_next_action(apply_effect=False)
+            while self.execution_engine.action_queue.has_pending_actions():
+                result = self.execution_engine.action_queue.process_next_action(apply_effect=False)
                 if result:
                     # Create a message for this action (with deferred effect)
                     message = self._create_action_message(result)
