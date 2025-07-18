@@ -75,6 +75,16 @@ class ActionExecutor:
         # Record the action
         self.game_state.record_action(GameAction.PLAY_INK)
         
+        # Trigger INK_PLAYED event
+        ink_context = EventContext(
+            event_type=GameEvent.INK_PLAYED,
+            player=player,
+            game_state=self.game_state,
+            source=card,
+            additional_data={'card': card}
+        )
+        self.event_manager.trigger_event(ink_context)
+        
         return ActionResult(
             success=True,
             action_type=GameAction.PLAY_INK,

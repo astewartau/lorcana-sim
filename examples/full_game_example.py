@@ -401,6 +401,114 @@ def display_step_message(message: StepExecutedMessage):
                 print(f"📚 {player_name} skipped first turn draw")
             return
             
+        elif event == GameEvent.INK_PLAYED:
+            player = context.get('player')
+            card = context.get('card')
+            
+            if player and card:
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                card_name = card.name if hasattr(card, 'name') else str(card)
+                print(f"🔮 {player_name} inked {card_name}")
+            else:
+                player_name = context.get('player_name', 'Unknown Player')
+                card_name = context.get('card_name', 'Unknown Card')
+                print(f"🔮 {player_name} inked {card_name}")
+            return
+            
+        elif event in [GameEvent.PHASE_BEGINS, GameEvent.PHASE_ENDS]:
+            player = context.get('player')
+            phase = context.get('phase')
+            previous_phase = context.get('previous_phase')
+            new_phase = context.get('new_phase')
+            
+            player_name = player.name if (player and hasattr(player, 'name')) else 'Unknown Player'
+            
+            if event == GameEvent.PHASE_BEGINS and phase:
+                phase_name = phase.value if hasattr(phase, 'value') else str(phase)
+                print(f"⚙️ Phase change ({player_name}; {phase_name} phase)")
+            elif event == GameEvent.PHASE_BEGINS and new_phase:
+                phase_name = new_phase.value if hasattr(new_phase, 'value') else str(new_phase)
+                print(f"⚙️ Phase change ({player_name}; {phase_name} phase)")
+            elif event == GameEvent.PHASE_ENDS and phase:
+                phase_name = phase.value if hasattr(phase, 'value') else str(phase)
+                print(f"⚙️ Phase change ({player_name}; ending {phase_name} phase)")
+            elif event == GameEvent.PHASE_ENDS and previous_phase:
+                phase_name = previous_phase.value if hasattr(previous_phase, 'value') else str(previous_phase)
+                print(f"⚙️ Phase change ({player_name}; ending {phase_name} phase)")
+            else:
+                print(f"⚙️ Phase change ({player_name})")
+            return
+            
+        elif event == GameEvent.CHARACTER_PLAYED:
+            character = context.get('character')
+            player = context.get('player')
+            
+            if character and player:
+                character_name = character.name if hasattr(character, 'name') else "Unknown"
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                print(f"🎭 {player_name} played {character_name}")
+            elif character:
+                character_name = character.name if hasattr(character, 'name') else "Unknown"
+                print(f"🎭 Played {character_name}")
+            else:
+                character_name = context.get('character_name', 'Unknown')
+                player_name = context.get('player_name', 'Unknown Player')
+                print(f"🎭 {player_name} played {character_name}")
+            return
+            
+        elif event == GameEvent.CHARACTER_QUESTS:
+            character = context.get('character')
+            player = context.get('player')
+            lore_gained = context.get('lore_gained', 0)
+            
+            if character and player:
+                character_name = character.name if hasattr(character, 'name') else "Unknown"
+                player_name = player.name if hasattr(player, 'name') else str(player)
+                print(f"🏆 {player_name}'s {character_name} quested for {lore_gained} lore")
+            elif character:
+                character_name = character.name if hasattr(character, 'name') else "Unknown"
+                print(f"🏆 {character_name} quested for {lore_gained} lore")
+            else:
+                character_name = context.get('character_name', 'Unknown')
+                print(f"🏆 {character_name} quested for {lore_gained} lore")
+            return
+            
+        elif event == GameEvent.CHARACTER_CHALLENGES:
+            attacker = context.get('attacker')
+            defender = context.get('defender')
+            damage_to_attacker = context.get('damage_to_attacker', 0)
+            damage_to_defender = context.get('damage_to_defender', 0)
+            banished_characters = context.get('banished_characters', [])
+            
+            if attacker and defender:
+                attacker_name = attacker.name if hasattr(attacker, 'name') else "Unknown"
+                defender_name = defender.name if hasattr(defender, 'name') else "Unknown"
+                
+                damage_parts = []
+                if damage_to_defender > 0:
+                    damage_parts.append(f"{defender_name} took {damage_to_defender} damage")
+                if damage_to_attacker > 0:
+                    damage_parts.append(f"{attacker_name} took {damage_to_attacker} damage")
+                
+                banished_parts = []
+                for char in banished_characters:
+                    char_name = char.name if hasattr(char, 'name') else "Unknown"
+                    banished_parts.append(f"{char_name} banished")
+                
+                details = []
+                if damage_parts:
+                    details.extend(damage_parts)
+                if banished_parts:
+                    details.extend(banished_parts)
+                
+                detail_text = f" ({', '.join(details)})" if details else ""
+                print(f"⚔️ {attacker_name} challenged {defender_name}{detail_text}")
+            else:
+                attacker_name = context.get('attacker_name', 'Unknown')
+                defender_name = context.get('defender_name', 'Unknown')
+                print(f"⚔️ {attacker_name} challenged {defender_name}")
+            return
+            
         elif event == GameEvent.GAME_ENDS:
             result = context.get('result')
             if result == 'lore_victory':
@@ -518,7 +626,10 @@ def display_step_message(message: StepExecutedMessage):
         step_str = str(step).lower()
     else:
         step_str = ""
-        
+    
+    # Try to get additional context from message if available
+    player_name = message.player.name if message.player else "Unknown Player"
+    
     if "ability_triggered" in step_str:
         print(f"✨ Ability triggered")
     elif "character_readied" in step_str or "readied" in step_str:
@@ -527,13 +638,45 @@ def display_step_message(message: StepExecutedMessage):
         # Already handled by structured event_data above
         return
     elif "ink" in step_str:
-        print(f"🔮 Ink action")
+        # Try to find ink action context
+        if hasattr(message, 'event_data') and message.event_data:
+            context = message.event_data.get('context', {})
+            card = context.get('card')
+            if card and hasattr(card, 'name'):
+                print(f"🔮 {player_name} inked {card.name}")
+            else:
+                print(f"🔮 {player_name} played ink")
+        else:
+            print(f"🔮 {player_name} played ink")
     elif "play" in step_str:
-        print(f"🎭 Card played")
+        print(f"🎭 {player_name} played a card")
     elif "quest" in step_str:
-        print(f"🏆 Character quested")
+        print(f"🏆 {player_name}'s character quested")
     elif "challenge" in step_str:
-        print(f"⚔️ Character challenged")
+        # Try to find challenge context
+        if hasattr(message, 'event_data') and message.event_data:
+            context = message.event_data.get('context', {})
+            attacker = context.get('attacker')
+            defender = context.get('defender')
+            damage_to_attacker = context.get('damage_to_attacker', 0)
+            damage_to_defender = context.get('damage_to_defender', 0)
+            
+            if attacker and defender:
+                attacker_name = attacker.name if hasattr(attacker, 'name') else "Unknown"
+                defender_name = defender.name if hasattr(defender, 'name') else "Unknown"
+                
+                damage_parts = []
+                if damage_to_defender > 0:
+                    damage_parts.append(f"{defender_name} took {damage_to_defender} damage")
+                if damage_to_attacker > 0:
+                    damage_parts.append(f"{attacker_name} took {damage_to_attacker} damage")
+                
+                damage_text = f" ({', '.join(damage_parts)})" if damage_parts else ""
+                print(f"⚔️ {attacker_name} challenged {defender_name}{damage_text}")
+            else:
+                print(f"⚔️ {player_name}'s character challenged")
+        else:
+            print(f"⚔️ {player_name}'s character challenged")
     elif "character_banished" in step_str:
         print(f"💀 Character banished")
     elif "card_discarded" in step_str:
@@ -541,9 +684,22 @@ def display_step_message(message: StepExecutedMessage):
     elif "lore_gained" in step_str:
         print(f"⭐ Lore gained")
     elif "phase" in step_str:
-        print(f"⚙️ Phase change")
+        # Try to find phase context
+        if hasattr(message, 'event_data') and message.event_data:
+            context = message.event_data.get('context', {})
+            previous_phase = context.get('previous_phase')
+            new_phase = context.get('new_phase')
+            
+            if new_phase and hasattr(new_phase, 'value'):
+                print(f"⚙️ Phase change ({player_name}; {new_phase.value} phase)")
+            elif previous_phase and hasattr(previous_phase, 'value'):
+                print(f"⚙️ Phase change ({player_name}; ending {previous_phase.value} phase)")
+            else:
+                print(f"⚙️ Phase change ({player_name})")
+        else:
+            print(f"⚙️ Phase change ({player_name})")
     elif "turn_ended" in step_str:
-        print(f"🔄 Turn ended")
+        print(f"🔄 {player_name} ended turn")
     else:
         # Generic step display
         print(f"📋 Game step: {step}")

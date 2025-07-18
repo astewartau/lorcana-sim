@@ -601,7 +601,7 @@ class GameEngine:
                 else:
                     description = result_type.replace('_', ' ').title()
             
-            # Special handling for character_quested to use structured event_data
+            # Special handling for specific action types to use structured event_data
             if hasattr(result, 'result_type') and result.result_type.value == "character_quested":
                 character = result.data.get('character') if result.data else None
                 lore = result.data.get('lore_gained', 0) if result.data else 0
@@ -614,6 +614,20 @@ class GameEngine:
                         player=character.controller if character and hasattr(character, 'controller') else self.game_state.current_player,
                         amount=lore,
                         source=character
+                    )
+                )
+            elif hasattr(result, 'result_type') and result.result_type.value == "ink_played":
+                card = result.data.get('card') if result.data else None
+                player = result.data.get('player') if result.data else self.game_state.current_player
+                message = StepExecutedMessage(
+                    type=MessageType.STEP_EXECUTED,
+                    player=self.game_state.current_player,
+                    step=GameEvent.INK_PLAYED,
+                    event_data=create_event_data(
+                        GameEvent.INK_PLAYED,
+                        player=player,
+                        card=card,
+                        source=card
                     )
                 )
             else:
