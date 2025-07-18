@@ -1,12 +1,13 @@
 """Execution engine for handling all internal game logic execution."""
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Deque
+from collections import deque
 from ..models.game.game_state import GameState, GameAction
 from ..models.cards.character_card import CharacterCard
 from ..models.cards.action_card import ActionCard
 from ..models.cards.item_card import ItemCard
 from .move_validator import MoveValidator
-from .event_system import GameEventManager
+from .event_system import GameEventManager, GameEvent
 from .damage_calculator import DamageCalculator
 from .choice_system import GameChoiceManager
 from .action_result import ActionResult
@@ -23,12 +24,13 @@ class ExecutionEngine:
     Combines action execution, step progression, and conditional effects.
     """
     
-    def __init__(self, game_state, validator, event_manager, damage_calculator, choice_manager, execution_mode):
+    def __init__(self, game_state, validator, event_manager, damage_calculator, choice_manager, execution_mode, message_queue: Deque):
         self.game_state = game_state
         self.validator = validator
         self.event_manager = event_manager
         self.damage_calculator = damage_calculator
         self.choice_manager = choice_manager
+        self.message_queue = message_queue
         
         # Execution components
         self.action_executor = ActionExecutor(
@@ -43,7 +45,14 @@ class ExecutionEngine:
     
     def execute_action(self, action: GameAction, parameters: Dict) -> ActionResult:
         """Execute action directly and return result."""
-        return self._execute_action_direct(action, parameters)
+        result = self._execute_action_direct(action, parameters)
+        
+        # If this was a PROGRESS action with draw events, queue draw messages
+        if (action == GameAction.PROGRESS and result.success and 
+            hasattr(result, 'data') and result.data and 'draw_events' in result.data):
+            self._queue_draw_event_messages(result.data['draw_events'])
+        
+        return result
     
     def process_move_as_steps(self, move: GameMove) -> List[GameStep]:
         """Convert a move into executable steps."""
@@ -217,6 +226,32 @@ class ExecutionEngine:
             self.game_state, 
             EvaluationTrigger.PHASE_CHANGE
         )
+    
+    def _queue_draw_event_messages(self, draw_events: List[Dict]) -> None:
+        """Queue draw event messages for UI display."""
+        for event in draw_events:
+            if event.get('type') == 'card_drawn':
+                cards_drawn = event.get('cards_drawn', [])
+                player_name = event.get('player', 'Unknown')
+                
+                for card in cards_drawn:
+                    card_name = card.name if hasattr(card, 'name') else 'Unknown Card'
+                    draw_message = StepExecutedMessage(
+                        type=MessageType.STEP_EXECUTED,
+                        player=self.game_state.current_player,
+                        step_id="card_drawn",
+                        description=f"{player_name} drew {card_name}",
+                        result="Drew",
+                        event_data={
+                            'event': GameEvent.CARD_DRAWN,
+                            'context': {
+                                'player_name': player_name,
+                                'card_name': card_name,
+                                'card': card
+                            }
+                        }
+                    )
+                    self.message_queue.append(draw_message)
     
     @property
     def condition_evaluator(self):

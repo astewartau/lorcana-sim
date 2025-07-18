@@ -519,8 +519,54 @@ class ActionExecutor:
             )
             
         elif current_phase == Phase.DRAW:
-            # Execute draw step
-            draw_events = self.game_state.draw_step()
+            # Execute draw step with events (similar to GameEngine.draw_card_with_events)
+            current_player = self.game_state.current_player
+            
+            # Draw card (skip on first turn for first player)
+            should_draw = not (self.game_state.turn_number == 1 and 
+                              self.game_state.current_player_index == 0 and 
+                              not self.game_state.first_turn_draw_skipped)
+            
+            draw_events = []
+            if should_draw:
+                card = current_player.draw_card()
+                if card:
+                    # Set the last event with structured data
+                    source = "draw_phase"
+                    
+                    self.game_state.set_last_event(
+                        'CARD_DRAWN',
+                        player=current_player.name,
+                        cards_drawn=[card],
+                        count=1,
+                        source=source,
+                        hand_size_after=len(current_player.hand),
+                        deck_size_after=len(current_player.deck)
+                    )
+                    
+                    # Handle zone transition: card moved from deck to hand
+                    zone_events = self.game_state.notify_card_zone_change(card, 'deck', 'hand')
+                    if zone_events:
+                        draw_events.extend(zone_events)
+                    
+                    # Trigger CARD_DRAWN event
+                    draw_context = EventContext(
+                        event_type=GameEvent.CARD_DRAWN,
+                        source=card,
+                        player=current_player,
+                        game_state=self.game_state
+                    )
+                    self.event_manager.trigger_event(draw_context)
+                    
+                    draw_events.append({
+                        'type': 'card_drawn',  # Use lowercase for consistency with _queue_game_event_message
+                        'player': current_player.name,
+                        'cards_drawn': [card],  # Match expected format
+                        'card': card,
+                        'source': source
+                    })
+            elif self.game_state.turn_number == 1 and self.game_state.current_player_index == 0:
+                self.game_state.first_turn_draw_skipped = True
             
             # Advance to PLAY phase
             self.game_state.advance_phase()

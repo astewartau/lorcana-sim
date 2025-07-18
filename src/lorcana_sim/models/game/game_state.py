@@ -204,7 +204,22 @@ class GameState:
         """Record an action for stalemate detection."""
         self._turn_management.record_action(action, self)
     
+    def set_last_event(self, event_type: str, **kwargs) -> None:
+        """Set the last event that occurred in the game."""
+        import time
+        self.last_event = {
+            'type': event_type,
+            'timestamp': time.time(),
+            **kwargs
+        }
     
+    def get_last_event(self) -> Optional[Dict[str, Any]]:
+        """Get the last event that occurred in the game."""
+        return self.last_event
+    
+    def clear_last_event(self) -> None:
+        """Clear the last event."""
+        self.last_event = None
     
     def __str__(self) -> str:
         """String representation of the game state."""

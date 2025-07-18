@@ -463,8 +463,9 @@ def display_step_message(message: StepExecutedMessage):
         print(f"✨ {description}")
     elif "character_readied" in step_id.lower() or "readied" in description:
         print(f"🔄 {description}")
-    elif "card_drawn" in step_id.lower() or "drew" in description:
-        print(f"📚 {description}")
+    elif step_id == "card_drawn":
+        # Already handled by structured event_data above
+        return
     elif "ink dried" in description:
         print(f"💧 {description}")
     elif "ink" in step_id.lower() or description.startswith("Inked"):

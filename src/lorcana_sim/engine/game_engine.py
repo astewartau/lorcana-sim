@@ -37,17 +37,17 @@ class GameEngine:
         self.damage_calculator = DamageCalculator(game_state)
         self.choice_manager = GameChoiceManager()
         
-        # Two main engines
-        self.execution_engine = ExecutionEngine(
-            game_state, self.validator, self.event_manager, 
-            self.damage_calculator, self.choice_manager, execution_mode
-        )
-        
         # Message stream components (will move to MessageEngine later)
         self.message_queue = deque()
         self.current_steps = deque()
         self.waiting_for_input = False
         self.current_choice = None
+        
+        # Two main engines
+        self.execution_engine = ExecutionEngine(
+            game_state, self.validator, self.event_manager, 
+            self.damage_calculator, self.choice_manager, execution_mode, self.message_queue
+        )
         
         # Legacy components for compatibility
         self.step_engine = StepProgressionEngine(execution_mode)
@@ -154,22 +154,6 @@ class GameEngine:
         return self.execution_engine.execute_action(action, parameters)
     
     # Delegate action execution methods to maintain compatibility with any direct calls
-    def _execute_set_step(self) -> ActionResult:
-        """Execute the set step."""
-        self.game_state.set_step()
-        return ActionResult(
-            ActionResultType.SUCCESS,
-            data={'phase': 'set', 'message': 'Set step completed'}
-        )
-    
-    def _execute_draw_step(self) -> ActionResult:
-        """Execute the draw step."""
-        draw_events = self.game_state.draw_step()
-        return ActionResult(
-            ActionResultType.SUCCESS,
-            data={'phase': 'draw', 'draw_events': draw_events}
-        )
-    
     # =============================================================================
     # PLAYER CHOICE SYSTEM METHODS
     # =============================================================================
