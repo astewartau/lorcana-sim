@@ -10,6 +10,26 @@ if TYPE_CHECKING:
     from ..models.cards.action_card import ActionCard
     # NOTE: StepProgressionEngine removed in Phase 4
 
+from ..models.abilities.composable.conditional_effects import ActivationZone
+
+
+def get_card_current_zone(card: Any, game_state: 'GameState') -> Optional['ActivationZone']:
+    """Determine which zone a card is currently in."""
+    for player in game_state.players:
+        if card in player.hand:
+            return ActivationZone.HAND
+        elif card in player.characters_in_play:
+            return ActivationZone.PLAY
+        elif card in player.deck:
+            return ActivationZone.DECK
+        elif hasattr(player, 'discard_pile') and card in player.discard_pile:
+            return ActivationZone.DISCARD
+        elif hasattr(player, 'discard') and card in player.discard:
+            return ActivationZone.DISCARD
+        elif card in player.inkwell:
+            return ActivationZone.INK_WELL
+    return None
+
 
 class GameEvent(Enum):
     """Types of game events that can trigger abilities."""
@@ -102,6 +122,7 @@ class EventContext:
     player: Any = None  # The player who controls the source
     game_state: 'GameState' = None
     additional_data: Dict[str, Any] = None
+    action_queue: Optional[Any] = None  # Action queue for abilities to queue effects
     
     # Enhanced context for named abilities
     banishment_cause: Optional[str] = None  # "challenge", "ability", etc.
@@ -127,6 +148,7 @@ class GameEventManager:
     
     def register_composable_ability(self, ability: Any) -> None:
         """Register a composable ability with the event manager."""
+        
         # For composable abilities, get events from the ability's listeners
         if hasattr(ability, 'listeners'):
             # Get all events that any listener in this ability cares about
@@ -139,6 +161,7 @@ class GameEventManager:
             # If no relevant events found, the ability doesn't need event registration
             if not relevant_events:
                 return
+            
         else:
             # For non-composable abilities, they must implement get_relevant_events() method
             if hasattr(ability, 'get_relevant_events'):
@@ -151,7 +174,34 @@ class GameEventManager:
                 self._composable_listeners[event] = []
             self._composable_listeners[event].append(ability)
     
-    
+    def register_all_abilities(self) -> None:
+        """Register all abilities from all cards in the game at initialization."""
+        total_abilities_registered = 0
+        
+        for player in self.game_state.players:
+            # Register abilities from all zones
+            all_cards = []
+            all_cards.extend(player.deck)
+            all_cards.extend(player.hand)
+            all_cards.extend(player.characters_in_play)
+            if hasattr(player, 'discard_pile'):
+                all_cards.extend(player.discard_pile)
+            elif hasattr(player, 'discard'):
+                all_cards.extend(player.discard)
+            all_cards.extend(player.inkwell)
+            
+            for card in all_cards:
+                if hasattr(card, 'composable_abilities'):
+                    for ability in card.composable_abilities:
+                        # Skip non-composable abilities (old system) that don't have activation_zones
+                        if not hasattr(ability, 'activation_zones'):
+                            continue
+                        
+                        # Register for ALL activation zones this ability supports
+                        self.register_composable_ability(ability)
+                        total_abilities_registered += 1
+        
+        
     def unregister_composable_ability(self, ability: Any) -> None:
         """Unregister a composable ability from the event manager."""
         for event_list in self._composable_listeners.values():
@@ -173,6 +223,11 @@ class GameEventManager:
     
     def trigger_event(self, event_context: EventContext) -> List[str]:
         """Trigger an event and execute all listening composable abilities."""
+        # Ensure action_queue is available for abilities - universal fix for missing action_queue
+        if not hasattr(event_context, 'action_queue') or event_context.action_queue is None:
+            if hasattr(self, 'execution_engine') and hasattr(self.execution_engine, 'action_queue'):
+                event_context.action_queue = self.execution_engine.action_queue
+        
         # Check interceptors first - they can pause/modify event processing
         for interceptor in self.event_interceptors:
             try:
@@ -196,6 +251,14 @@ class GameEventManager:
         
         for ability in composable_abilities:
             try:
+                # NEW: Check if source card is in valid zone for this ability
+                source_card = getattr(ability, 'character', None)
+                if source_card:
+                    current_zone = get_card_current_zone(source_card, event_context.game_state)
+                    if current_zone not in ability.activation_zones:
+                        # Skip this ability if card is not in valid zone
+                        continue
+                
                 # NOTE: Step-based abilities removed in Phase 4
                 # All abilities now use effect-based execution through ActionQueue
                 
@@ -208,16 +271,8 @@ class GameEventManager:
                 
                 if triggered:
                     ability.handle_event(event_context)
-                    # Get effect details for more informative output
-                    effect_details = []
-                    for listener in ability.listeners:
-                        if listener.should_trigger(event_context):
-                            effect_details.append(str(listener.effect))
-                    
-                    if effect_details:
-                        results.append(f"Triggered {ability.name}: {', '.join(effect_details)}")
-                    else:
-                        results.append(f"Triggered composable ability: {ability.name}")
+                    # Don't generate immediate messages - let the action queue handle messaging
+                    # when effects are actually executed
             except Exception as e:
                 results.append(f"Error executing composable ability {ability}: {str(e)}")
         

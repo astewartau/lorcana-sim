@@ -73,6 +73,8 @@ class ActionQueue:
             source_description=source_description
         )
         
+        from ..models.abilities.composable.effects import AbilityTriggerEffect
+        
         # Insert based on priority
         if priority == ActionPriority.IMMEDIATE:
             self._queue.appendleft(action)

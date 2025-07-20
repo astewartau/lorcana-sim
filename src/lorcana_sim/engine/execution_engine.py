@@ -38,11 +38,11 @@ class ExecutionEngine:
         self.choice_manager = choice_manager
         
         # Execution components
-        self.action_executor = ActionExecutor(
-            game_state, validator, event_manager, damage_calculator, choice_manager
-        )
         # NOTE: step_engine removed in Phase 4
         self.action_queue = ActionQueue(event_manager)
+        self.action_executor = ActionExecutor(
+            game_state, validator, event_manager, damage_calculator, choice_manager, self.action_queue
+        )
         # NOTE: current_action_steps removed in Phase 4
         
         # Conditional effect evaluation

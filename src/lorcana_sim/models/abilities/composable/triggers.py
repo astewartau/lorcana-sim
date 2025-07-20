@@ -25,6 +25,7 @@ def when_event(event: GameEvent,
         if event_context.event_type != event:
             return False
         
+        
         # Check source filter
         if source_filter and not source_filter(event_context.source, event_context):
             return False
@@ -159,11 +160,35 @@ def when_ready_step() -> Callable[[EventContext], bool]:
 
 
 # Resource triggers
-def when_card_drawn(player: Any = None) -> Callable[[EventContext], bool]:
-    """Trigger when a card is drawn."""
-    if player:
+def when_card_drawn(player_or_character: Any = None) -> Callable[[EventContext], bool]:
+    """Trigger when a card is drawn.
+    
+    Args:
+        player_or_character: Can be:
+            - None: Trigger for any player drawing cards
+            - Player object: Trigger for that specific player
+            - Character object: Trigger for that character's controller (late binding)
+    """
+    def debug_filter(meta, ctx):
+        # Resolve the actual player at trigger evaluation time
+        target_player = None
+        if player_or_character is None:
+            # Any player - always match
+            result = True
+        elif hasattr(player_or_character, 'name') and not hasattr(player_or_character, 'controller'):
+            # It's a Player object
+            target_player = player_or_character
+            result = ctx.player == target_player
+        else:
+            # It's a Character object - resolve controller at runtime
+            target_player = getattr(player_or_character, 'controller', None)
+            result = ctx.player == target_player
+        
+        return result
+    
+    if player_or_character:
         return when_event(GameEvent.CARD_DRAWN,
-                         metadata_filter=lambda meta, ctx: ctx.player == player)
+                         metadata_filter=debug_filter)
     return when_event(GameEvent.CARD_DRAWN)
 
 

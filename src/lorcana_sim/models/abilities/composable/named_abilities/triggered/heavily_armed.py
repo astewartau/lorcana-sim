@@ -17,7 +17,7 @@ def create_heavily_armed(character: Any, ability_data: dict):
     return quick_ability(
         "HEAVILY ARMED",
         character,
-        when_card_drawn(character.controller),
+        when_card_drawn(character),  # Pass character instead of character.controller for late binding
         SELF,
         ChallengerEffect(1)
     )

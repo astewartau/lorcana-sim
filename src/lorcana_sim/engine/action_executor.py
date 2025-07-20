@@ -18,12 +18,14 @@ class ActionExecutor:
     
     def __init__(self, game_state: GameState, validator: MoveValidator, 
                  event_manager: GameEventManager, damage_calculator: DamageCalculator,
-                 choice_manager: GameChoiceManager):
+                 choice_manager: GameChoiceManager, action_queue: Any = None):
         self.game_state = game_state
         self.validator = validator
         self.event_manager = event_manager
         self.damage_calculator = damage_calculator
         self.choice_manager = choice_manager
+        self.action_queue = action_queue
+    
     
     def execute_action(self, action: str, parameters: Dict[str, Any]) -> ActionResult:
         """Execute a game action and return the result."""
@@ -60,6 +62,7 @@ class ActionExecutor:
         player = self.game_state.current_player
         
         # Validation already happened in _execute_action_direct
+        
         # Use the player's play_ink method which handles everything correctly
         if not player.play_ink(card):
             return ActionResult(
@@ -68,6 +71,7 @@ class ActionExecutor:
                 result_type=ActionResultType.ACTION_FAILED,
                 error_message="Failed to play ink"
             )
+        
         
         # Mark that ink was played this turn
         self.game_state.ink_played_this_turn = True
@@ -81,7 +85,8 @@ class ActionExecutor:
             player=player,
             game_state=self.game_state,
             source=card,
-            additional_data={'card': card}
+            additional_data={'card': card},
+            action_queue=self.action_queue
         )
         self.event_manager.trigger_event(ink_context)
         
@@ -101,6 +106,7 @@ class ActionExecutor:
         modified_cost = self.game_state.get_modified_card_cost(card)
         
         # Validation already happened in _execute_action_direct
+        
         # Use the player's play_character method which handles ink cost and placement
         if not player.play_character(card, modified_cost):
             return ActionResult(
@@ -116,19 +122,14 @@ class ActionExecutor:
         # Register any conditional effects the card has
         self.game_state.register_card_conditional_effects(card)
         
-        # Register composable abilities
-        if hasattr(card, 'composable_abilities') and card.composable_abilities:
-            for ability in card.composable_abilities:
-                if hasattr(ability, 'register_with_event_manager'):
-                    ability.register_with_event_manager(self.event_manager, card)
-        
         # Trigger CHARACTER_ENTERS_PLAY event
         enter_play_context = EventContext(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             player=player,
             game_state=self.game_state,
             source=card,
-            additional_data={'character': card}
+            additional_data={'character': card},
+            action_queue=self.action_queue
         )
         
         # Check for choices in the event context
@@ -237,7 +238,8 @@ class ActionExecutor:
             event_type=GameEvent.CHARACTER_QUESTS,
             source=character,
             player=player,
-            game_state=self.game_state
+            game_state=self.game_state,
+            action_queue=self.action_queue
         )
         trigger_results = self.event_manager.trigger_event(event_context)
         
@@ -299,7 +301,8 @@ class ActionExecutor:
             additional_data={
                 'attacker': attacker,
                 'defender': defender
-            }
+            },
+            action_queue=self.action_queue
         )
         self.event_manager.trigger_event(challenge_context)
         
@@ -327,7 +330,8 @@ class ActionExecutor:
                     'damage_amount': damage_to_defender,
                     'damage_source': attacker,
                     'damage_type': DamageType.CHALLENGE
-                }
+                },
+                action_queue=self.action_queue
             )
             self.event_manager.trigger_event(damage_context)
         
@@ -341,7 +345,8 @@ class ActionExecutor:
                     'damage_amount': damage_to_attacker,
                     'damage_source': defender,
                     'damage_type': DamageType.CHALLENGE
-                }
+                },
+                action_queue=self.action_queue
             )
             self.event_manager.trigger_event(damage_context)
         
@@ -421,7 +426,8 @@ class ActionExecutor:
                 event_type=GameEvent.SET_PHASE,
                 player=self.game_state.current_player,
                 game_state=self.game_state,
-                additional_data={'phase': 'set'}
+                additional_data={'phase': 'set'},
+                action_queue=self.action_queue
             )
             self.event_manager.trigger_event(phase_context)
             
@@ -448,7 +454,8 @@ class ActionExecutor:
                 event_type=GameEvent.DRAW_PHASE,
                 player=self.game_state.current_player,
                 game_state=self.game_state,
-                additional_data={'phase': 'draw'}
+                additional_data={'phase': 'draw'},
+                action_queue=self.action_queue
             )
             self.event_manager.trigger_event(phase_context)
             
@@ -498,7 +505,8 @@ class ActionExecutor:
                         event_type=GameEvent.CARD_DRAWN,
                         source=card,
                         player=current_player,
-                        game_state=self.game_state
+                        game_state=self.game_state,
+                        action_queue=self.action_queue
                     )
                     self.event_manager.trigger_event(draw_context)
                     
@@ -520,7 +528,8 @@ class ActionExecutor:
                 event_type=GameEvent.PLAY_PHASE,
                 player=self.game_state.current_player,
                 game_state=self.game_state,
-                additional_data={'phase': 'play'}
+                additional_data={'phase': 'play'},
+                action_queue=self.action_queue
             )
             self.event_manager.trigger_event(phase_context)
             
@@ -545,7 +554,8 @@ class ActionExecutor:
                 event_type=GameEvent.TURN_ENDS,
                 player=previous_player,
                 game_state=self.game_state,
-                additional_data={'turn_number': previous_turn}
+                additional_data={'turn_number': previous_turn},
+                action_queue=self.action_queue
             )
             self.event_manager.trigger_event(turn_end_context)
             
@@ -558,7 +568,8 @@ class ActionExecutor:
                 event_type=GameEvent.TURN_BEGINS,
                 player=new_player,
                 game_state=self.game_state,
-                additional_data={'turn_number': self.game_state.turn_number}
+                additional_data={'turn_number': self.game_state.turn_number},
+                action_queue=self.action_queue
             )
             self.event_manager.trigger_event(turn_begin_context)
             
@@ -567,7 +578,8 @@ class ActionExecutor:
                 event_type=GameEvent.READY_PHASE,
                 player=new_player,
                 game_state=self.game_state,
-                additional_data={'phase': 'ready'}
+                additional_data={'phase': 'ready'},
+                action_queue=self.action_queue
             )
             self.event_manager.trigger_event(ready_phase_context)
             
@@ -617,7 +629,8 @@ class ActionExecutor:
             event_type=GameEvent.TURN_ENDS,
             player=previous_player,
             game_state=self.game_state,
-            additional_data={'turn_number': previous_turn}
+            additional_data={'turn_number': previous_turn},
+            action_queue=self.action_queue
         )
         self.event_manager.trigger_event(turn_end_context)
         
@@ -630,7 +643,8 @@ class ActionExecutor:
             event_type=GameEvent.TURN_BEGINS,
             player=new_player,
             game_state=self.game_state,
-            additional_data={'turn_number': self.game_state.turn_number}
+            additional_data={'turn_number': self.game_state.turn_number},
+            action_queue=self.action_queue
         )
         self.event_manager.trigger_event(turn_begin_context)
         

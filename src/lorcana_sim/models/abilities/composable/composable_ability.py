@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from .effects import Effect
 from .target_selectors import TargetSelector
+from .conditional_effects import ActivationZone
 from ....engine.event_system import GameEvent, EventContext
 
 
@@ -20,13 +21,15 @@ class ComposableListener:
     def should_trigger(self, event_context: EventContext) -> bool:
         """Check if this listener should trigger for the event."""
         try:
-            return self.trigger_condition(event_context)
-        except Exception:
+            result = self.trigger_condition(event_context)
+            return result
+        except Exception as e:
             # If trigger check fails, don't trigger
             return False
     
     def execute(self, event_context: EventContext) -> None:
         """Execute this listener's effect."""
+        
         # Create context for target selection and effect application
         context = {
             'event_context': event_context,
@@ -34,7 +37,8 @@ class ComposableListener:
             'game_state': event_context.game_state,
             'player': event_context.player,
             'ability_name': self.name,
-            'ability_owner': event_context.source
+            'ability_owner': event_context.source,
+            'action_queue': getattr(event_context, 'action_queue', None)
         }
         
         # Add ability owner info if available
@@ -43,36 +47,60 @@ class ComposableListener:
         
         # Select targets
         targets = self.target_selector.select(context)
-        
-        # Queue effect for each target instead of applying immediately (ONE EFFECT PER CALL principle)
+
+        # Queue ability trigger effect instead of direct effect (TWO-STAGE EXECUTION)
         action_queue = context.get('action_queue')
+        
         if action_queue and targets:
-            from ...engine.action_queue import ActionPriority
+            try:
+                from ....engine.action_queue import ActionPriority
+                from .effects import AbilityTriggerEffect
+                
+            except Exception as e:
+                return
+            
+            # Create ability trigger wrapper
+            trigger_effect = AbilityTriggerEffect(
+                ability_name=self.name,
+                source_card=context.get('ability_owner', event_context.source),
+                actual_effect=self.effect
+            )
+            
             for target in targets:
                 try:
                     action_queue.enqueue(
-                        effect=self.effect,
+                        effect=trigger_effect,  # Queue the wrapper, not the direct effect
                         target=target,
                         context=context,
                         priority=ActionPriority.HIGH,  # Triggered effects go to front
-                        source_description=f"{self.name} triggered"
+                        source_description=f"✨ Triggered {getattr(context.get('ability_owner'), 'name', 'Unknown')}'s {self.name}: {str(self.effect)}"
                     )
                 except Exception as e:
                     # Log error but don't crash the game
-                    print(f"Error applying effect {self.effect} to target {target}: {e}")
+                    pass
         elif action_queue:
             # For effects that don't need targets (like PreventEffect) - queue them too
+            from ...engine.action_queue import ActionPriority
+            from .effects import AbilityTriggerEffect
+            
+            # Create ability trigger wrapper
+            trigger_effect = AbilityTriggerEffect(
+                ability_name=self.name,
+                source_card=context.get('ability_owner', event_context.source),
+                actual_effect=self.effect
+            )
+            
             try:
                 action_queue.enqueue(
-                    effect=self.effect,
+                    effect=trigger_effect,  # Queue the wrapper, not the direct effect
                     target=None,
                     context=context,
                     priority=ActionPriority.HIGH,  # Triggered effects go to front
-                    source_description=f"{self.name} triggered (no target)"
+                    source_description=f"✨ Triggered {getattr(context.get('ability_owner'), 'name', 'Unknown')}'s {self.name}: {str(self.effect)}"
                 )
             except Exception as e:
                 # Log error but don't crash the game
-                print(f"Error queuing effect {self.effect} with no target: {e}")
+                pass
         else:
             # Fallback: apply immediately if no action_queue available (backwards compatibility)
             try:
@@ -112,6 +140,7 @@ class ComposableAbility:
         self.listeners: List[ComposableListener] = []
         self._event_manager: Optional[Any] = None
         self._registered_events: Set[GameEvent] = set()
+        self.activation_zones: Set[ActivationZone] = {ActivationZone.PLAY}  # Default to play only
     
     def add_trigger(self, 
                    trigger_condition: Callable[[EventContext], bool],
@@ -133,6 +162,11 @@ class ComposableAbility:
         if self._event_manager:
             self._register_listener(listener)
         
+        return self
+    
+    def active_in_zones(self, *zones: ActivationZone) -> 'ComposableAbility':
+        """Set which zones this ability can be active in (fluent interface)."""
+        self.activation_zones = set(zones)
         return self
     
     def handle_event(self, event_context: EventContext) -> None:
@@ -328,6 +362,6 @@ def quick_ability(name: str, character: Any, trigger_condition: Callable,
                   target_selector: TargetSelector, effect: Effect) -> ComposableAbility:
     """Quick way to create a simple composable ability."""
     return (ComposableAbility(name, character)
-            .add_trigger(trigger_condition, target_selector, effect))
+            .add_trigger(trigger_condition, target_selector, effect, name=name))
 
 

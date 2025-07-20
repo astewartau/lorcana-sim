@@ -48,6 +48,24 @@ class Effect(ABC):
         return self.__class__.__name__
 
 
+class AbilityTriggerEffect(Effect):
+    """Effect that represents an ability triggering, which then queues the actual effect."""
+    
+    def __init__(self, ability_name: str, source_card: Any, actual_effect: Effect):
+        self.ability_name = ability_name
+        self.source_card = source_card
+        self.actual_effect = actual_effect
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> None:
+        """Apply the actual effect directly - don't queue it again."""
+        # Apply the real effect immediately instead of queuing it
+        # This prevents duplicate messages
+        self.actual_effect.apply(target, context)
+    
+    def __str__(self) -> str:
+        return str(self.actual_effect)
+
+
 class CompositeEffect(Effect):
     """Multiple effects applied in sequence."""
     

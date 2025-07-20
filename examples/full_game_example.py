@@ -394,6 +394,12 @@ def format_card_display(card, include_owner=False):
 def display_step_message(message: StepExecutedMessage, game_state=None):
     """Display a step execution message in a user-friendly format."""
     
+    # Debug: Log all effect data to see if ability triggers are being processed
+    if hasattr(message, 'effect_data') and message.effect_data:
+        effect_type = message.effect_data.get('type')
+        if effect_type == 'ability_trigger':
+            print(f"[DEBUG] Ability trigger effect found: {message.effect_data}")
+    
     # Extract action type from step for better formatting
     step = message.step
     
@@ -402,6 +408,10 @@ def display_step_message(message: StepExecutedMessage, game_state=None):
         event_data = message.event_data
         event = event_data.get('event')
         context = event_data.get('context', {})
+        
+        # Debug: Log all events to see what's happening
+        if event == GameEvent.CARD_DRAWN:
+            print(f"[DEBUG] CARD_DRAWN event detected in display_step_message")
         
         # Handle GameEvent enum-based events
         if event == GameEvent.CHARACTER_READIED:
@@ -420,7 +430,7 @@ def display_step_message(message: StepExecutedMessage, game_state=None):
             return
             
         elif event == GameEvent.CARD_DRAWN:
-            # Handle both old and new event_data structure
+            # Debug: Check if this is the draw that should trigger HEAVILY ARMED
             player = context.get('player')
             card = context.get('card')
             
@@ -429,6 +439,18 @@ def display_step_message(message: StepExecutedMessage, game_state=None):
                 player_name = player.name if hasattr(player, 'name') else str(player)
                 card_name = card.name if hasattr(card, 'name') else str(card)
                 print(f"📚 {player_name} drew {card_name}")
+                
+                # Debug: Check for any characters with abilities in play
+                if player_name == "Ashley":
+                    print(f"[DEBUG] Ashley drew {card_name}, checking for abilities in play...")
+                    characters_in_play = getattr(player, 'characters_in_play', [])
+                    print(f"[DEBUG] Characters in play: {len(characters_in_play)}")
+                    for i, char in enumerate(characters_in_play):
+                        char_name = getattr(char, 'name', f'Character {i}')
+                        abilities = getattr(char, 'composable_abilities', [])
+                        print(f"[DEBUG] {char_name} has {len(abilities)} composable abilities")
+                        for ability in abilities:
+                            print(f"[DEBUG] - Ability: {ability.name}")
             else:
                 # Fallback to old structure
                 player_name = context.get('player_name', 'Unknown Player')
@@ -629,7 +651,13 @@ def display_step_message(message: StepExecutedMessage, game_state=None):
         effect_data = message.effect_data
         effect_type = effect_data.get('type')
         
-        if effect_type == 'discard_card':
+        if effect_type == 'ability_trigger':
+            source = effect_data.get('source_card_name', 'Unknown')
+            ability = effect_data.get('ability_name', 'ability')
+            print(f"✨ {source} triggered {ability}")
+            return
+            
+        elif effect_type == 'discard_card':
             card_name = effect_data.get('card_name', 'Unknown Card')
             player_name = effect_data.get('player_name', 'Unknown Player')
             print(f"🗑️ {player_name} discarded {card_name}")

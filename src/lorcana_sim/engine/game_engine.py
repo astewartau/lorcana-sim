@@ -69,6 +69,9 @@ class GameEngine:
         )
         self.choice_engine = ChoiceEngine(game_state, self.choice_manager)
         
+        # Give event_manager access to action_queue for universal action_queue fix
+        self.event_manager.execution_engine = self.execution_engine
+        
         # Legacy components for compatibility
         self.input_manager = InputManager()
         self.snapshot_manager = SnapshotManager()
@@ -76,8 +79,8 @@ class GameEngine:
         # Set up integration
         self._setup_input_handlers()
         
-        # Register all triggered abilities from characters currently in play
-        self.event_manager.rebuild_listeners()
+        # Register all abilities from all cards in all zones at game initialization
+        self.event_manager.register_all_abilities()
     
     def start_game(self):
         """Start the game by triggering the initial TURN_BEGINS event."""
@@ -140,7 +143,8 @@ class GameEngine:
                 event_type=GameEvent.CARD_DRAWN,
                 source=card,
                 player=player,
-                game_state=self.game_state
+                game_state=self.game_state,
+                action_queue=self.execution_engine.action_queue
             )
             self.event_manager.trigger_event(draw_context)
         return card
@@ -380,11 +384,22 @@ class GameEngine:
         
         from ..models.abilities.composable.effects import (
             DiscardCard, GainLoreEffect, DrawCards, BanishCharacter, 
-            ReturnToHand, ExertCharacter, ReadyCharacter, RemoveDamageEffect
+            ReturnToHand, ExertCharacter, ReadyCharacter, RemoveDamageEffect,
+            AbilityTriggerEffect
         )
         
         effect = executed_action.effect
         target = executed_action.target
+        
+        # Handle ability trigger announcements
+        if isinstance(effect, AbilityTriggerEffect):
+            return {
+                "type": "ability_trigger",
+                "ability_name": effect.ability_name,
+                "source_card_name": getattr(effect.source_card, 'name', 'Unknown'),
+                "effect_preview": str(effect.actual_effect),
+                "target": target
+            }
         
         # Extract structured data based on effect type
         if isinstance(effect, DiscardCard):
