@@ -403,8 +403,8 @@ class MessageEngine:
             context = event_data['context']
             
             if event_type.value == 'card_drawn':
-                if not context.get('draw_failed'):
-                    # Queue DrawCards effect
+                if not context.get('draw_failed') and context.get('should_draw'):
+                    # Queue DrawCards effect (only when should_draw is True)
                     self.execution_engine.action_queue.enqueue(
                         effect=DrawCards(1),
                         target=self.game_state.current_player,
@@ -497,6 +497,8 @@ class MessageEngine:
         # Extract effect data for message creation
         executed_action = result.queued_action
         effect_data = self._extract_effect_data(executed_action, result)
+        
+        # Every action must generate a message - never return None
         
         step_description = executed_action.source_description if executed_action and executed_action.source_description else f"action_{result.action_id}"
         

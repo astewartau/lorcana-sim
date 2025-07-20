@@ -8,6 +8,7 @@ from lorcana_sim.models.cards.character_card import CharacterCard
 from lorcana_sim.models.cards.base_card import CardColor, Rarity
 from lorcana_sim.engine.game_engine import ExecutionMode
 from lorcana_sim.engine.event_system import GameEvent
+from lorcana_sim.engine.game_moves import PassMove
 
 
 class TestDrawEventsFix:
@@ -61,6 +62,9 @@ class TestDrawEventsFix:
         # Create game state and engine
         self.game_state = GameState([self.player1, self.player2])
         self.game_engine = GameEngine(self.game_state, ExecutionMode.MANUAL)
+        
+        # Start the game (this was missing!)
+        self.game_engine.start_game()
     
     def test_first_player_skips_first_draw(self):
         """Test that first player correctly skips draw on first turn."""
@@ -72,29 +76,32 @@ class TestDrawEventsFix:
         assert len(self.player1.deck) == 5
         assert len(self.player1.hand) == 0
         
-        # Execute draw phase
-        result = self.game_engine.execution_engine.execute_action("progress", {})
+        # Execute draw phase using message-based API
+        initial_deck_size = len(self.player1.deck)
+        initial_hand_size = len(self.player1.hand)
         
-        # Should succeed but not draw any cards
-        assert result.success
-        assert 'draw_events' in result.data
-        assert len(result.data['draw_events']) == 0
+        # Process the draw phase message
+        message = self.game_engine.next_message()
         
-        # No cards should have been drawn
-        assert len(self.player1.deck) == 5
-        assert len(self.player1.hand) == 0
+        # Auto-progress through the draw phase
+        self.game_engine.next_message(PassMove())
         
-        # In the new architecture, no separate draw messages are generated for skipped draws
-        # The behavior is validated by checking that no cards were drawn (already checked above)
+        # No cards should have been drawn (first player skips first draw)
+        assert len(self.player1.deck) == initial_deck_size
+        assert len(self.player1.hand) == initial_hand_size
     
     def test_second_player_draws_on_first_turn(self):
         """Test that second player draws a card on their first turn."""
         # Progress to second player's draw phase
         self._progress_to_phase(Phase.DRAW)  # First player's draw
-        self.game_engine.execution_engine.execute_action("progress", {})  # DRAW -> PLAY
-        self.game_engine.execution_engine.execute_action("progress", {})  # PLAY -> READY (second player)
-        self.game_engine.execution_engine.execute_action("progress", {})  # READY -> SET
-        self.game_engine.execution_engine.execute_action("progress", {})  # SET -> DRAW
+        
+        # Complete first player's turn and get to second player's draw
+        self._progress_to_phase(Phase.PLAY)  # First player's play phase
+        # Pass through play phase to end first player's turn
+        message = self.game_engine.next_message(PassMove())
+        
+        # Now should be second player's turn, progress to their draw phase
+        self._progress_to_phase(Phase.DRAW)
         
         # Check we're on second player's draw phase
         assert self.game_state.current_player == self.player2
@@ -104,30 +111,19 @@ class TestDrawEventsFix:
         
         # No need to clear message queue in new architecture
         
-        # Execute draw phase
-        result = self.game_engine.execution_engine.execute_action("progress", {})
+        # Execute draw phase using message-based API
+        initial_deck_size = len(self.player2.deck)
+        initial_hand_size = len(self.player2.hand)
         
-        # Should succeed and draw a card
-        assert result.success
-        assert 'draw_events' in result.data
-        assert len(result.data['draw_events']) == 1
+        # Process the draw phase message
+        message = self.game_engine.next_message()
         
-        # Check draw event structure
-        draw_event = result.data['draw_events'][0]
-        assert draw_event['type'] == 'card_drawn'
-        assert draw_event['player'] == 'Bob'
-        assert len(draw_event['cards_drawn']) == 1
-        assert draw_event['source'] == 'draw_phase'
+        # Auto-progress through the draw phase
+        self.game_engine.next_message(PassMove())
         
-        # Card should have been drawn
-        assert len(self.player2.deck) == 4
-        assert len(self.player2.hand) == 1
-        
-        # In the new architecture, draw events are processed through next_message() calls
-        # The behavior is validated by checking that the card was actually drawn (already checked above)
-        
-        # Core draw functionality verified by card count checks above
-        # Message generation is now handled on-demand through next_message() calls
+        # Card should have been drawn (second player draws on first turn)
+        assert len(self.player2.deck) == initial_deck_size - 1
+        assert len(self.player2.hand) == initial_hand_size + 1
     
     def test_player_draws_on_second_turn(self):
         """Test that first player draws on their second turn."""
@@ -145,30 +141,19 @@ class TestDrawEventsFix:
         
         # No need to clear message queue in new architecture
         
-        # Execute draw phase
-        result = self.game_engine.execution_engine.execute_action("progress", {})
+        # Execute draw phase using message-based API
+        initial_deck_size = len(self.player1.deck)
+        initial_hand_size = len(self.player1.hand)
         
-        # Should succeed and draw a card
-        assert result.success
-        assert 'draw_events' in result.data
-        assert len(result.data['draw_events']) == 1
+        # Process the draw phase message
+        message = self.game_engine.next_message()
         
-        # Check draw event structure
-        draw_event = result.data['draw_events'][0]
-        assert draw_event['type'] == 'card_drawn'
-        assert draw_event['player'] == 'Alice'
-        assert len(draw_event['cards_drawn']) == 1
-        assert draw_event['source'] == 'draw_phase'
+        # Auto-progress through the draw phase
+        self.game_engine.next_message(PassMove())
         
-        # Card should have been drawn
-        assert len(self.player1.deck) == 4
-        assert len(self.player1.hand) == 1
-        
-        # In the new architecture, draw events are processed through next_message() calls
-        # The behavior is validated by checking that the card was actually drawn (already checked above)
-        
-        # Core draw functionality verified by card count checks above
-        # Message generation is now handled on-demand through next_message() calls
+        # Card should have been drawn (first player draws on second turn)
+        assert len(self.player1.deck) == initial_deck_size - 1
+        assert len(self.player1.hand) == initial_hand_size + 1
     
     def test_set_last_event_method_exists(self):
         """Test that the set_last_event method exists and works."""
@@ -192,15 +177,44 @@ class TestDrawEventsFix:
     
     def _progress_to_phase(self, target_phase: Phase):
         """Helper to progress to a specific phase."""
-        while self.game_state.current_phase != target_phase:
-            self.game_engine.execution_engine.execute_action("progress", {})
+        max_iterations = 20  # Safety limit
+        iterations = 0
+        
+        while self.game_state.current_phase != target_phase and iterations < max_iterations:
+            # Use the message-based API like full_game_example.py
+            message = self.game_engine.next_message()
+            
+            # Auto-progress through non-play phases by passing
+            if hasattr(message, 'phase') and message.phase != Phase.PLAY:
+                self.game_engine.next_message(PassMove())
+            
+            iterations += 1
+        
+        if iterations >= max_iterations:
+            raise RuntimeError(f"Failed to reach {target_phase} after {max_iterations} iterations, stuck at {self.game_state.current_phase}")
     
     def _complete_full_round(self):
         """Helper to complete a full round (both players complete their turns)."""
-        # Player 1's turn
-        while self.game_state.current_player == self.player1:
-            self.game_engine.execution_engine.execute_action("progress", {})
+        max_iterations = 50  # Safety limit for full round
+        iterations = 0
+        starting_player = self.game_state.current_player
         
-        # Player 2's turn
-        while self.game_state.current_player == self.player2:
-            self.game_engine.execution_engine.execute_action("progress", {})
+        # Complete current player's turn
+        while self.game_state.current_player == starting_player and iterations < max_iterations:
+            message = self.game_engine.next_message()
+            if hasattr(message, 'phase') and message.phase == Phase.PLAY:
+                # In play phase, need to pass the turn
+                self.game_engine.next_message(PassMove())
+            iterations += 1
+        
+        # Complete second player's turn  
+        second_player = self.game_state.current_player
+        while self.game_state.current_player == second_player and iterations < max_iterations:
+            message = self.game_engine.next_message()
+            if hasattr(message, 'phase') and message.phase == Phase.PLAY:
+                # In play phase, need to pass the turn
+                self.game_engine.next_message(PassMove())
+            iterations += 1
+        
+        if iterations >= max_iterations:
+            raise RuntimeError(f"Failed to complete full round after {max_iterations} iterations")

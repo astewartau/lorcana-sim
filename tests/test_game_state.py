@@ -260,7 +260,9 @@ class TestPlayer:
         assert len(player.hand) == 0
         assert len(player.deck) == 0
         assert player.lore == 0
-        assert player.ink_used_this_turn == 0
+        # Test exerted ink count instead of ink_used_this_turn
+        exerted_ink = len([card for card in player.inkwell if card.exerted])
+        assert exerted_ink == 0
     
     def test_ink_calculations(self, mock_character, mock_action):
         """Test ink calculation properties."""
@@ -276,10 +278,13 @@ class TestPlayer:
         assert player.available_ink == 2
         
         # Spend some ink
-        player.spend_ink(1)
+        exerted_cards = player.spend_ink(1)
         assert player.total_ink == 2
         assert player.available_ink == 1
-        assert player.ink_used_this_turn == 1
+        assert len(exerted_cards) == 1
+        # Check that 1 ink card is now exerted
+        exerted_ink = len([card for card in player.inkwell if card.exerted])
+        assert exerted_ink == 1
     
     def test_can_afford(self, mock_character):
         """Test affordability checking."""
@@ -353,7 +358,9 @@ class TestPlayer:
         assert len(player.hand) == 0
         assert len(player.characters_in_play) == 1
         assert mock_character in player.characters_in_play
-        assert player.ink_used_this_turn == 3
+        # Check that 3 ink cards are now exerted
+        exerted_ink = len([card for card in player.inkwell if card.exerted])
+        assert exerted_ink == 3
     
     def test_ready_characters(self, mock_character):
         """Test readying characters."""
@@ -415,29 +422,26 @@ class TestMoveValidator:
         """Test legal actions vary by phase."""
         validator = MoveValidator(game_state)
         
-        # READY phase
+        # READY phase - now auto-progresses, no manual actions
         game_state.current_phase = Phase.READY
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
-        assert "progress" in action_types
-        assert "pass_turn" in action_types
-        assert "play_ink" not in action_types
+        # READY phase auto-progresses - no actions should be available
+        assert len(action_types) == 0
         
-        # SET phase
+        # SET phase - now auto-progresses, no manual actions
         game_state.current_phase = Phase.SET
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
-        assert "progress" in action_types
-        assert "pass_turn" in action_types
-        assert "play_ink" not in action_types
+        # SET phase auto-progresses - no actions should be available
+        assert len(action_types) == 0
         
-        # DRAW phase
+        # DRAW phase - now auto-progresses, no manual actions
         game_state.current_phase = Phase.DRAW
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
-        assert "progress" in action_types
-        assert "pass_turn" in action_types
-        assert "play_ink" not in action_types
+        # DRAW phase auto-progresses - no actions should be available
+        assert len(action_types) == 0
         
         # PLAY phase - give player enough ink to play cards
         game_state.current_phase = Phase.PLAY

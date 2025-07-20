@@ -155,29 +155,30 @@ class PhaseManagementComponent:
         return set_events
     
     def draw_step(self, game_state: "GameState") -> List[Dict[str, Any]]:
-        """Execute the draw step (draw a card).
+        """Determine what should happen in the draw step WITHOUT executing it.
         
         Returns:
-            List of event data for draw events that occurred.
+            List of event data for draw events that should occur.
         """
         from ....engine.event_system import GameEvent
         
         current_player = game_state.current_player
         draw_events = []
         
-        # Draw card (skip on first turn for first player)
+        # Determine if card should be drawn (skip on first turn for first player)
         should_draw = not (game_state.turn_number == 1 and 
                           game_state.current_player_index == 0 and 
                           not game_state.first_turn_draw_skipped)
         
         if should_draw:
-            drawn_card = current_player.draw_card()
-            if drawn_card:
+            # DON'T execute the draw - just indicate that a draw should happen
+            # Check if deck is empty to know if draw will fail
+            if len(current_player.deck) > 0:
                 draw_events.append({
                     'event': GameEvent.CARD_DRAWN,
                     'context': {
                         'player_name': current_player.name,
-                        'card_name': drawn_card.name
+                        'should_draw': True
                     }
                 })
             else:

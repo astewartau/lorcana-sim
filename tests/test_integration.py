@@ -11,7 +11,7 @@ from lorcana_sim.models.cards.item_card import ItemCard
 from lorcana_sim.models.cards.location_card import LocationCard
 from lorcana_sim.models.game.deck import Deck
 from lorcana_sim.models.game.player import Player
-from lorcana_sim.models.game.game_state import GameState
+from lorcana_sim.models.game.game_state import GameState, Phase
 from lorcana_sim.loaders.lorcana_json_parser import LorcanaJsonParser
 from lorcana_sim.loaders.dreamborn_parser import DreambornParser
 
@@ -184,6 +184,9 @@ def test_create_simple_game(sample_cards):
     # Test basic game operations with the new engine
     from src.lorcana_sim.engine.move_validator import MoveValidator
     validator = MoveValidator(game)
+    
+    # Game starts in READY phase which auto-progresses, so set to PLAY phase for actions
+    game.current_phase = Phase.PLAY
     legal_actions = validator.get_all_legal_actions()
     assert len(legal_actions) > 0
     
