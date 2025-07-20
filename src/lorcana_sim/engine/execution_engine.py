@@ -2,7 +2,7 @@
 
 from typing import Dict, Any, List, Optional, Deque
 from collections import deque
-from ..models.game.game_state import GameState, GameAction
+from ..models.game.game_state import GameState
 from ..models.cards.character_card import CharacterCard
 from ..models.cards.action_card import ActionCard
 from ..models.cards.item_card import ItemCard
@@ -11,10 +11,15 @@ from .event_system import GameEventManager, GameEvent
 from .damage_calculator import DamageCalculator
 from .choice_system import GameChoiceManager
 from .action_result import ActionResult
-from .step_system import StepProgressionEngine, GameStep, ExecutionMode
+# NOTE: Step system imports removed in Phase 4
 from .action_queue import ActionQueue
 from .action_executor import ActionExecutor
-from .game_moves import GameMove, ActionMove, InkMove, PlayMove, QuestMove, ChallengeMove, SingMove
+from .game_moves import GameMove, InkMove, PlayMove, QuestMove, ChallengeMove, SingMove
+from ..models.abilities.composable.effects import (
+    InkCardEffect, PlayCharacterEffect, PlayActionEffect, PlayItemEffect,
+    QuestEffect, ChallengeEffect, SingEffect, PhaseProgressionEffect
+)
+from .action_queue import ActionPriority
 from .game_messages import StepExecutedMessage, MessageType
 from ..models.abilities.composable.conditional_effects import ActivationZone
 
@@ -25,48 +30,157 @@ class ExecutionEngine:
     Combines action execution, step progression, and conditional effects.
     """
     
-    def __init__(self, game_state, validator, event_manager, damage_calculator, choice_manager, execution_mode, message_queue: Deque):
+    def __init__(self, game_state, validator, event_manager, damage_calculator, choice_manager, execution_mode):
         self.game_state = game_state
         self.validator = validator
         self.event_manager = event_manager
         self.damage_calculator = damage_calculator
         self.choice_manager = choice_manager
-        self.message_queue = message_queue
         
         # Execution components
         self.action_executor = ActionExecutor(
             game_state, validator, event_manager, damage_calculator, choice_manager
         )
-        self.step_engine = StepProgressionEngine(execution_mode)
+        # NOTE: step_engine removed in Phase 4
         self.action_queue = ActionQueue(event_manager)
-        self.current_action_steps = []
+        # NOTE: current_action_steps removed in Phase 4
         
         # Conditional effect evaluation
         self._condition_evaluator = None
     
-    def execute_action(self, action: GameAction, parameters: Dict) -> ActionResult:
+    def execute_action(self, action: str, parameters: Dict) -> ActionResult:
         """Execute action directly and return result."""
         result = self._execute_action_direct(action, parameters)
         
-        # If this was a PROGRESS action with draw events, queue draw messages
-        if (action == GameAction.PROGRESS and result.success and 
-            hasattr(result, 'data') and result.data and 'draw_events' in result.data):
-            self._queue_draw_event_messages(result.data['draw_events'])
+        # Draw events are now handled by the new on-demand message generation system
+        # when draw effects are executed through the ActionQueue ("ONE EFFECT PER CALL" principle)
         
         return result
     
-    def process_move_as_steps(self, move: GameMove) -> List[GameStep]:
-        """Convert a move into executable steps."""
-        if isinstance(move, ActionMove):
-            return self._create_action_steps(move.action, move.parameters)
-        elif isinstance(move, (InkMove, PlayMove, QuestMove, ChallengeMove, SingMove)):
-            action_move = self._convert_to_action_move(move)
-            return self._create_action_steps(action_move.action, action_move.parameters)
-        return []
+    def process_move(self, move: GameMove) -> str:
+        """Convert move directly to effect and queue it.
+        
+        Returns:
+            The action ID for tracking
+        """
+        from .game_moves import PassMove, ChoiceMove
+        
+        if isinstance(move, InkMove):
+            return self.action_queue.enqueue(
+                effect=InkCardEffect(move.card),
+                target=self.game_state.current_player,
+                context={'game_state': self.game_state},
+                priority=ActionPriority.NORMAL,
+                source_description=f"Player inks {move.card.name}"
+            )
+            
+        elif isinstance(move, PlayMove):
+            if isinstance(move.card, CharacterCard):
+                effect = PlayCharacterEffect(move.card)
+            elif isinstance(move.card, ActionCard):
+                effect = PlayActionEffect(move.card)
+            elif isinstance(move.card, ItemCard):
+                effect = PlayItemEffect(move.card)
+            else:
+                raise ValueError(f"Unknown card type for PlayMove: {type(move.card)}")
+                
+            return self.action_queue.enqueue(
+                effect=effect,
+                target=self.game_state.current_player,
+                context={'game_state': self.game_state},
+                priority=ActionPriority.NORMAL,
+                source_description=f"Player plays {move.card.name}"
+            )
+            
+        elif isinstance(move, QuestMove):
+            return self.action_queue.enqueue(
+                effect=QuestEffect(move.character),
+                target=move.character,
+                context={'game_state': self.game_state},
+                priority=ActionPriority.NORMAL,
+                source_description=f"{move.character.name} quests"
+            )
+            
+        elif isinstance(move, ChallengeMove):
+            return self.action_queue.enqueue(
+                effect=ChallengeEffect(move.attacker, move.defender),
+                target=move.defender,
+                context={'game_state': self.game_state, 'attacker': move.attacker},
+                priority=ActionPriority.NORMAL,
+                source_description=f"{move.attacker.name} challenges {move.defender.name}"
+            )
+            
+        elif isinstance(move, SingMove):
+            return self.action_queue.enqueue(
+                effect=SingEffect(move.singer, move.song),
+                target=move.song,
+                context={'game_state': self.game_state, 'singer': move.singer},
+                priority=ActionPriority.NORMAL,
+                source_description=f"{move.singer.name} sings {move.song.name}"
+            )
+            
+        elif isinstance(move, PassMove):
+            return self.action_queue.enqueue(
+                effect=PhaseProgressionEffect(),
+                target=self.game_state,
+                context={'game_state': self.game_state},
+                priority=ActionPriority.NORMAL,
+                source_description="Player passes/progresses"
+            )
+            
+        elif isinstance(move, ChoiceMove):
+            # Choices resolve immediately, not queued
+            self.choice_manager.resolve_choice(move.choice_id, move.option)
+            return ""  # No action ID for immediate resolution
+            
+        # NOTE: ActionMove support REMOVED in Phase 4
+        
+        raise ValueError(f"Cannot process move type: {type(move)}")
+
+    # NOTE: process_move_as_steps REMOVED in Phase 4 - use process_move instead
     
-    def execute_next_step(self) -> StepExecutedMessage:
-        """Execute the next queued step."""
-        return self._execute_next_step()
+    def execute_next_effect(self) -> Optional[Any]:
+        """Execute the next effect from the action queue.
+        
+        Returns:
+            The result of executing the effect, or None if queue is empty
+        """
+        return self.action_queue.process_next_action()
+    
+    def queue_reactive_effects(self) -> List[str]:
+        """Check and queue reactive effects that should trigger.
+        
+        Returns:
+            List of action IDs for queued reactive effects
+        """
+        action_ids = []
+        
+        # Check reactive conditions (like banishment)
+        reactive_events = self._check_reactive_conditions()
+        
+        # For now, we don't queue effects for reactive events
+        # This will be enhanced when we integrate with hook system
+        
+        return action_ids
+    
+    def queue_conditional_effects(self) -> List[str]:
+        """Evaluate and queue conditional effects.
+        
+        Returns:
+            List of action IDs for queued conditional effects  
+        """
+        action_ids = []
+        
+        # This will be implemented when conditional effects are uncommented
+        # For now, just return empty list
+        
+        return action_ids
+    
+    def has_pending_effects(self) -> bool:
+        """Check if there are effects waiting to be executed."""
+        return self.action_queue.has_pending_actions()
+
+    # NOTE: execute_next_step REMOVED in Phase 4 - use execute_next_effect instead
     
     def evaluate_conditional_effects(self, trigger_context) -> List[Dict]:
         """Evaluate and trigger conditional effects."""
@@ -80,7 +194,7 @@ class ExecutionEngine:
             trigger_context
         )
     
-    def can_execute_action(self, action: GameAction, parameters: Dict) -> bool:
+    def can_execute_action(self, action: str, parameters: Dict) -> bool:
         """Check if action can be executed."""
         is_valid, _ = self.validator.validate_action(action, parameters)
         return is_valid
@@ -103,12 +217,8 @@ class ExecutionEngine:
     
     def _execute_action_direct(self, action, parameters: Dict[str, Any]) -> ActionResult:
         """Execute a game action directly (internal use only)."""
-        # Convert string actions to GameAction enum if needed
-        if isinstance(action, str):
-            try:
-                action = GameAction(action)
-            except ValueError:
-                return ActionResult.failure_result(action, f"Unknown action: {action}")
+        # NOTE: Action conversion simplified in Phase 4
+        # Actions are now handled as strings directly
         
         # Check if game is over
         if self.game_state.is_game_over():
@@ -123,84 +233,101 @@ class ExecutionEngine:
         # Execute the action using the ActionExecutor
         try:
             # Adjust parameters for ActionExecutor format
-            if action == GameAction.SING_SONG:
+            if action == "sing_song":
                 # ActionExecutor expects 'character' and 'song' keys
                 adjusted_params = {
                     'character': parameters.get('singer'),
                     'song': parameters.get('song')
                 }
-                return self.action_executor.execute_action(action, adjusted_params)
+                result = self.action_executor.execute_action(action, adjusted_params)
             else:
-                return self.action_executor.execute_action(action, parameters)
+                result = self.action_executor.execute_action(action, parameters)
+            
+            return result
         
         except Exception as e:
             return ActionResult.failure_result(action, f"Error executing action: {str(e)}")
     
-    def _convert_to_action_move(self, move: GameMove) -> ActionMove:
-        """Convert specific move types to generic action moves."""
-        if isinstance(move, InkMove):
-            return ActionMove(GameAction.PLAY_INK, {'card': move.card})
-        elif isinstance(move, PlayMove):
-            if isinstance(move.card, CharacterCard):
-                return ActionMove(GameAction.PLAY_CHARACTER, {'card': move.card})
-            elif isinstance(move.card, ActionCard):
-                return ActionMove(GameAction.PLAY_ACTION, {'card': move.card})
-            elif isinstance(move.card, ItemCard):
-                return ActionMove(GameAction.PLAY_ITEM, {'card': move.card})
-        elif isinstance(move, QuestMove):
-            return ActionMove(GameAction.QUEST_CHARACTER, {'character': move.character})
-        elif isinstance(move, ChallengeMove):
-            return ActionMove(GameAction.CHALLENGE_CHARACTER, {'attacker': move.attacker, 'defender': move.defender})
-        elif isinstance(move, SingMove):
-            return ActionMove(GameAction.SING_SONG, {'singer': move.singer, 'song': move.song})
-        
-        raise ValueError(f"Cannot convert move type: {type(move)}")
+    # NOTE: _convert_to_action_move REMOVED in Phase 4
     
-    def _create_action_steps(self, action: GameAction, parameters: Dict[str, Any]) -> List[GameStep]:
-        """Create steps for a game action."""
-        # For now, disable step creation to use clean direct execution
-        # This ensures all actions use the new clean messaging format
-        return []
+    # NOTE: _convert_action_move_to_effect REMOVED in Phase 4
     
-    def _execute_next_step(self) -> StepExecutedMessage:
-        """Execute the next step and return message."""
-        # This method would need to be implemented based on the step execution logic
-        # For now, return a placeholder
-        return StepExecutedMessage(
-            type=MessageType.STEP_EXECUTED,
-            player=self.game_state.current_player,
-            step="placeholder"
-        )
+    # NOTE: _create_action_steps REMOVED in Phase 4
     
-    def _evaluate_conditional_effects_after_move(self, move: GameMove) -> None:
-        """Evaluate conditional effects after a move is processed."""
+    # NOTE: _create_choice_steps REMOVED in Phase 4
+    
+    # NOTE: _execute_next_step REMOVED in Phase 4
+    
+    def _evaluate_conditional_effects_before_step(self) -> List[Dict]:
+        """Evaluate conditional effects before a step is executed."""
         from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
         
-        if self._condition_evaluator is None:
-            return
+        events = []
         
-        # Determine trigger type based on move
-        trigger = EvaluationTrigger.STEP_EXECUTED
-        if isinstance(move, PlayMove):
-            trigger = EvaluationTrigger.CARD_PLAYED
-        elif isinstance(move, (ActionMove,)):
-            # Check if this caused a phase or turn change
-            trigger = EvaluationTrigger.PHASE_CHANGE
+        # Evaluate conditional effects (reactive conditions are handled separately in MessageEngine)
+        if self._condition_evaluator is not None:
+            conditional_events = self._condition_evaluator.evaluate_all_conditions(
+                self.game_state, 
+                EvaluationTrigger.STEP_EXECUTED
+            )
+            events.extend(conditional_events)
         
-        # Evaluate and return events (don't queue them here)
-        return self._condition_evaluator.evaluate_all_conditions(self.game_state, trigger)
+        return events
     
-    def _evaluate_conditional_effects_after_step(self) -> List[Dict]:
-        """Evaluate conditional effects after a step is executed."""
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
+    def _check_reactive_conditions(self) -> List[Dict]:
+        """Check for reactive conditions that should trigger after game state changes.
         
-        if self._condition_evaluator is None:
-            return []
+        This includes banishment (willpower <= 0), but can be extended for other 
+        reactive conditions like discard limits, win conditions, etc.
+        """
+        from .event_system import EventContext
         
-        return self._condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            EvaluationTrigger.STEP_EXECUTED
-        )
+        events = []
+        
+        # Check banishment conditions (willpower <= 0)
+        characters_to_banish = []
+        for player in self.game_state.players:
+            for character in player.characters_in_play[:]:  # Copy list to avoid modification during iteration
+                if character.current_willpower <= 0:
+                    characters_to_banish.append((character, player))
+        
+        # Banish characters and create events - but only process ONE at a time
+        if characters_to_banish:
+            # Only process the first character that needs banishing
+            character, player = characters_to_banish[0]
+            
+            # Actually banish the character
+            if character in player.characters_in_play:
+                player.characters_in_play.remove(character)
+                player.discard_pile.append(character)
+                
+                # Trigger CHARACTER_BANISHED event
+                banish_context = EventContext(
+                    event_type=GameEvent.CHARACTER_BANISHED,
+                    player=player,
+                    game_state=self.game_state,
+                    source=character,
+                    additional_data={
+                        'character': character,
+                        'reason': 'willpower_depleted'
+                    }
+                )
+                
+                # Trigger the event through the event manager
+                self.event_manager.trigger_event(banish_context)
+                
+                # Create event dict for message system
+                from .game_event_types import GameEventType
+                events.append({
+                    'type': GameEventType.CHARACTER_BANISHED,
+                    'character': character,
+                    'character_name': character.name,
+                    'player': player,
+                    'player_name': player.name,
+                    'reason': 'willpower_depleted'
+                })
+        
+        return events
     
     def _evaluate_conditional_effects_on_turn_change(self) -> List[Dict]:
         """Evaluate conditional effects when turn changes."""
@@ -226,36 +353,21 @@ class ExecutionEngine:
             EvaluationTrigger.PHASE_CHANGE
         )
     
-    def _queue_draw_event_messages(self, draw_events: List[Dict]) -> None:
-        """Queue draw event messages for UI display."""
-        for event in draw_events:
-            if event.get('type') == 'card_drawn':
-                cards_drawn = event.get('cards_drawn', [])
-                player_name = event.get('player', 'Unknown')
-                
-                # Get player object - use current player if name matches, otherwise look up
-                player = None
-                if player_name == self.game_state.current_player.name:
-                    player = self.game_state.current_player
-                elif player_name == self.game_state.players[0].name:
-                    player = self.game_state.players[0]
-                elif player_name == self.game_state.players[1].name:
-                    player = self.game_state.players[1]
-                
-                for card in cards_drawn:
-                    draw_message = StepExecutedMessage(
-                        type=MessageType.STEP_EXECUTED,
-                        player=self.game_state.current_player,
-                        step=GameEvent.CARD_DRAWN,
-                        event_data={
-                            'event': GameEvent.CARD_DRAWN,
-                            'context': {
-                                'player': player,
-                                'card': card
-                            }
-                        }
-                    )
-                    self.message_queue.append(draw_message)
+    def _resolve_choice_direct(self, choice_id: str, option: str) -> ActionResult:
+        """Resolve a choice directly."""
+        # This should delegate to the choice manager
+        from .action_result import ActionResult
+        # NOTE: GameAction import removed in Phase 4
+        
+        try:
+            success = self.choice_manager.provide_choice(choice_id, option)
+            if success:
+                return ActionResult.success_result("progress", {})
+            else:
+                return ActionResult.failure_result("progress", f"Failed to resolve choice {choice_id}")
+        except Exception as e:
+            return ActionResult.failure_result("progress", f"Error resolving choice: {str(e)}")
+    
     
     @property
     def condition_evaluator(self):

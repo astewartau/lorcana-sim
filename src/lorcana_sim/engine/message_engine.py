@@ -1,7 +1,6 @@
 """MessageEngine for handling message flow and structured event data creation."""
 
 from typing import Dict, Any, Optional, List
-from collections import deque
 from ..models.game.game_state import GameState
 from .event_system import GameEvent
 from .choice_system import GameChoiceManager
@@ -11,6 +10,29 @@ from .game_messages import (
     StepExecutedMessage, GameOverMessage, LegalAction
 )
 from .game_moves import GameMove, ChoiceMove
+
+
+class ReadyInkReportEffect:
+    """A simple effect that reports ink ready events without doing any actual readying."""
+    
+    def __init__(self, ink_count: int):
+        self.ink_count = ink_count
+    
+    def apply(self, target, context):
+        # No-op: The readying was already done in phase_management.ready_step
+        return target
+
+
+class ReadyCharacterReportEffect:
+    """A simple effect that reports character ready events without doing any actual readying."""
+    
+    def __init__(self, character_name: str, character=None):
+        self.character_name = character_name
+        self.character = character  # Store full character object if available
+    
+    def apply(self, target, context):
+        # No-op: The readying was already done in phase_management.ready_step
+        return target
 
 
 def create_event_data(event: GameEvent, **context) -> Dict[str, Any]:
@@ -24,72 +46,82 @@ def create_event_data(event: GameEvent, **context) -> Dict[str, Any]:
 class MessageEngine:
     """Handles message flow and structured event data creation - NO string formatting"""
     
-    def __init__(self, game_state: GameState, choice_manager: GameChoiceManager, validator: MoveValidator, execution_engine=None, shared_message_queue=None, shared_current_steps=None):
+    def __init__(self, game_state: GameState, choice_manager: GameChoiceManager, validator: MoveValidator, execution_engine=None):
         self.game_state = game_state
         self.choice_manager = choice_manager
         self.validator = validator
         self.execution_engine = execution_engine  # Reference to ExecutionEngine for coordination
+        self.next_message_calls = 0
         
-        # Message flow components - share with GameEngine during transition
-        self.message_queue = shared_message_queue if shared_message_queue is not None else deque()
-        self.current_steps = shared_current_steps if shared_current_steps is not None else deque()
+        # Message flow components
         self.waiting_for_input = False
         
         # Choice handling (integrated with messages)
         self.current_choice = None
+        
+        # Conditional effect evaluation tracking
+        self.last_conditional_eval_turn = -1
+        self.last_conditional_eval_phase = ""
+        self.conditional_evaluations_this_call = 0
+        self.max_conditional_evals_per_call = 1  # Prevent infinite loops
     
     def next_message(self, move: Optional[GameMove] = None, game_engine=None) -> GameMessage:
-        """Get next message OR handle choice response"""
-        # Process move if provided (delegate to game engine for now)
-        if move and self.waiting_for_input:
-            if game_engine:
-                game_engine._process_move(move)
-                game_engine._evaluate_conditional_effects_after_move(move)
-            else:
-                self._process_choice_response(move)
+        """Process ONE effect and return ONE message.
+        
+        CRITICAL: This method executes exactly one effect from the ActionQueue.
+        If that effect triggers hooks that queue more effects, those effects
+        are NOT executed in this call - they wait for subsequent calls.
+        """
+        self.next_message_calls += 1
+        # Reset conditional evaluation counter for this call
+        self.conditional_evaluations_this_call = 0
+        
+        # 1. Validate input
+        if self.waiting_for_input and move is None:
+            raise ValueError("Expected move or choice but none provided")
+        
+        # 2. Process move if provided (queues effect, doesn't execute)
+        if move:
+            self._process_move(move)  # Converts to effect, queues at BACK
             self.waiting_for_input = False
         
-        # Return queued messages first
-        if self.message_queue:
-            message = self.message_queue.popleft()
-            # Apply deferred action if this message has one
-            if hasattr(message, 'deferred_action') and message.deferred_action:
-                # Apply the deferred effect now
-                try:
-                    result = message.deferred_action.effect.apply(message.deferred_action.target, message.deferred_action.context)
-                except Exception as e:
-                    print(f"DEBUG: Error applying deferred action: {e}")
-            return message
+        # 3. Check reactive conditions and process them immediately (create messages)
+        if self.execution_engine:
+            reactive_message = self._check_and_process_reactive_conditions()
+            if reactive_message:
+                return reactive_message
         
-        # Process pending actions from action queue (delegate to execution engine)
+        # 4. Evaluate conditional effects and queue them (don't execute)  
+        # Only evaluate if game state has actually changed since last evaluation
+        if self.execution_engine and self._should_evaluate_conditional_effects():
+            self._evaluate_and_queue_conditional_effects()
+        
+        # 4.5. Queue default action if no actions pending and phase requires default behavior
+        if self.execution_engine and not self.execution_engine.action_queue.has_pending_actions():
+            self._queue_default_action_if_needed()
+        
+        # 5. Execute ONLY the next effect from queue (ONE EFFECT ONLY)
         if self.execution_engine and self.execution_engine.action_queue.has_pending_actions():
-            if game_engine:
-                message = game_engine._process_next_queued_action()
-                if message:
-                    return message
+            # This executes ONE effect, which may:
+            # - Emit events that trigger hooks
+            # - Queue more effects (but doesn't execute them)
+            # - Return a result that we turn into a message
+            result = self.execution_engine.action_queue.process_next_action()
+            return self._create_message_from_result(result)
         
-        # Execute next step if available (delegate to game engine for now)
-        if self.current_steps:
-            if game_engine:
-                message = game_engine._execute_next_step()
-                game_engine._evaluate_conditional_effects_after_step()
-                return message
+        # 6. Check for pending choices
+        if self.choice_manager.has_pending_choices():
+            choice = self.choice_manager.get_current_choice()
+            self.waiting_for_input = True
+            msg = ChoiceRequiredMessage(
+                type=MessageType.CHOICE_REQUIRED,
+                player=choice.player,
+                choice=choice,
+                ability_source=getattr(choice, 'source', None)
+            )
+            return msg
         
-        # Check for choices
-        if self.current_choice or self.is_waiting_for_choice():
-            if not self.current_choice:
-                self.current_choice = self._get_current_choice()
-            
-            if self.current_choice:
-                self.waiting_for_input = True
-                return ChoiceRequiredMessage(
-                    type=MessageType.CHOICE_REQUIRED,
-                    player=self.current_choice.player,
-                    choice=self.current_choice,
-                    ability_source=getattr(self.current_choice, 'source', None)
-                )
-        
-        # Check game over
+        # 7. Check game over
         if self.game_state.is_game_over():
             result, winner, game_over_data = self.game_state.get_game_result()
             # Build reason string from game_over_data for backward compatibility
@@ -108,31 +140,38 @@ class MessageEngine:
                 elif result_type == 'stalemate':
                     reason = "Game ended in stalemate - both players unable to make progress"
             
-            return GameOverMessage(
+            msg = GameOverMessage(
                 type=MessageType.GAME_OVER,
                 player=self.game_state.current_player,
                 winner=winner,
                 reason=reason
             )
+            return msg
         
-        # Need player action
+        # 8. Check if player has legal actions
+        legal_actions = self._get_legal_actions()
+        
+        # 9. Auto-queue phase progression only if no legal actions available
+        if not legal_actions and not self.waiting_for_input:
+            self._queue_phase_progression()  # Queues effect for next call
+            # Return a special message indicating auto-progression
+            msg = StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step="auto_progression_queued"
+            )
+            return msg
+        
+        # 10. Request player action
         self.waiting_for_input = True
-        return ActionRequiredMessage(
+        msg = ActionRequiredMessage(
             type=MessageType.ACTION_REQUIRED,
             player=self.game_state.current_player,
             phase=self.game_state.current_phase,
-            legal_actions=self._get_legal_actions()
+            legal_actions=legal_actions
         )
+        return msg
     
-    def queue_event_message(self, event: GameEvent, context: Dict) -> None:
-        """Queue a message with structured event data"""
-        message = StepExecutedMessage(
-            type=MessageType.STEP_EXECUTED,
-            player=self.game_state.current_player,
-            step=event,
-            event_data=create_event_data(event, **context)
-        )
-        self.message_queue.append(message)
     
     def is_waiting_for_choice(self) -> bool:
         """Check if game is paused for player choice"""
@@ -167,3 +206,502 @@ class MessageEngine:
             legal_actions.append(legal_action)
         
         return legal_actions
+    
+    def _check_and_process_reactive_conditions(self) -> Optional[GameMessage]:
+        """Check reactive conditions and create messages for any triggered events."""
+        if not self.execution_engine:
+            return None
+        
+        # Get reactive events from execution engine
+        reactive_events = self.execution_engine._check_reactive_conditions()
+        
+        if not reactive_events:
+            return None
+            
+        # Convert the first reactive event to a message
+        # If there are multiple events, we'll return the first one and queue the rest
+        first_event = reactive_events[0]
+        message = self._create_reactive_message(first_event)
+        
+        # Note: Additional reactive events will be handled in subsequent next_message() calls
+        # This follows the "ONE EFFECT PER CALL" principle
+        
+        return message
+    
+    def _create_reactive_message(self, event: Dict) -> Optional[GameMessage]:
+        """Create a message for a reactive event."""
+        from .event_system import GameEvent
+        from .game_event_types import GameEventType
+        
+        # For now, we'll handle CHARACTER_BANISHED events
+        # The reactive events are actually already processed by the execution engine
+        # but we need to create messages for them
+        if event.get('type') == GameEventType.CHARACTER_BANISHED:
+            character = event.get('character')
+            player = event.get('player')
+            reason = event.get('reason', 'unknown')
+            
+            return StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step=GameEvent.CHARACTER_BANISHED,
+                event_data=create_event_data(
+                    GameEvent.CHARACTER_BANISHED,
+                    character=character,
+                    character_name=getattr(character, 'name', 'Unknown Character'),
+                    player=player,
+                    player_name=getattr(player, 'name', 'Unknown Player'),
+                    reason=reason
+                )
+            )
+        
+        # Add handlers for other reactive event types as needed
+        return None
+    
+    def _process_move(self, move: GameMove) -> None:
+        """Convert move directly to effect and queue it."""
+        if self.execution_engine:
+            self.execution_engine.process_move(move)
+    
+    def _check_and_queue_reactive_effects(self) -> None:
+        """Check reactive conditions and queue effects (don't execute)."""
+        if self.execution_engine:
+            reactive_events = self.execution_engine._check_reactive_conditions()
+    
+    def _should_evaluate_conditional_effects(self) -> bool:
+        """Check if conditional effects should be evaluated."""
+        current_turn = self.game_state.turn_number
+        current_phase = self.game_state.current_phase.value
+        
+        # Don't evaluate more than once per call
+        if self.conditional_evaluations_this_call >= self.max_conditional_evals_per_call:
+            return False
+        
+        # Only evaluate if turn or phase has changed
+        if (current_turn != self.last_conditional_eval_turn or 
+            current_phase != self.last_conditional_eval_phase):
+            return True
+        
+        return False
+    
+    def _evaluate_and_queue_conditional_effects(self) -> None:
+        """Evaluate conditional effects and queue them (don't execute)."""
+        if self.execution_engine:
+            # Update tracking
+            self.last_conditional_eval_turn = self.game_state.turn_number
+            self.last_conditional_eval_phase = self.game_state.current_phase.value
+            self.conditional_evaluations_this_call += 1
+            
+            conditional_events = self.execution_engine._evaluate_conditional_effects_before_step()
+            self._queue_conditional_effects(conditional_events)
+    
+    def _queue_conditional_effects(self, conditional_events: List[Dict]) -> None:
+        """Queue conditional effect events as effects with HIGH priority."""
+        if not conditional_events:
+            return
+            
+        from ..models.abilities.composable.effects import ConditionalEffectWrapper
+        from .action_queue import ActionPriority
+        
+        for event in conditional_events:
+            # Create a wrapper effect for the conditional event
+            effect = ConditionalEffectWrapper(event)
+            self.execution_engine.action_queue.enqueue(
+                effect=effect,
+                target=self.game_state.current_player,
+                context={'game_state': self.game_state, 'conditional_event': event},
+                priority=ActionPriority.HIGH,  # HIGH priority as specified in Phase 5
+                source_description=f"Conditional effect: {event.get('ability_name', 'Unknown')}"
+            )
+    
+    def _queue_default_action_if_needed(self) -> None:
+        """Queue default actions for phases that require automatic behavior."""
+        current_phase = self.game_state.current_phase
+        
+        if current_phase.value == 'ready':
+            # READY phase: Queue individual ready effects when queue is empty
+            self._queue_ready_phase_effects()
+        elif current_phase.value == 'set':
+            # SET phase: Queue set phase effects when queue is empty
+            self._queue_set_phase_effects()
+        elif current_phase.value == 'draw':
+            # DRAW phase: Queue draw phase effects when queue is empty
+            self._queue_draw_phase_effects()
+        # Note: PLAY phase should use the original logic that checks for legal actions
+
+    def _queue_ready_phase_effects(self) -> None:
+        """Queue individual ready phase effects instead of bundled PhaseProgressionEffect."""
+        from ..models.abilities.composable.effects import PhaseProgressionEffect
+        from .action_queue import ActionPriority
+        
+        # Get ready step events from phase management (this also executes the ready logic)
+        ready_events = self.game_state._phase_management.ready_step(self.game_state)
+        
+        # Create custom effects for each ready event that simply return the pre-computed data
+        for event_data in ready_events:
+            event_type = event_data['event']
+            context = event_data['context']
+            
+            if event_type.value == 'ink_readied':
+                # Create a custom effect that reports the ink ready event
+                ink_count = context.get('ink_count', 1)
+                effect = ReadyInkReportEffect(ink_count)
+                self.execution_engine.action_queue.enqueue(
+                    effect=effect,
+                    target=self.game_state.current_player,
+                    context={'game_state': self.game_state, 'ready_event': event_data},
+                    priority=ActionPriority.NORMAL,
+                    source_description=f"Ready {ink_count} ink"
+                )
+            elif event_type.value == 'character_readied':
+                # Create a custom effect that reports the character ready event
+                character_name = context.get('character_name', 'Unknown Character')
+                character = context.get('character')  # Get full character object if available
+                effect = ReadyCharacterReportEffect(character_name, character)
+                self.execution_engine.action_queue.enqueue(
+                    effect=effect,
+                    target=self.game_state.current_player,
+                    context={'game_state': self.game_state, 'ready_event': event_data},
+                    priority=ActionPriority.NORMAL,
+                    source_description=f"Ready character: {character_name}"
+                )
+        
+        # Finally, queue phase transition to SET
+        self.execution_engine.action_queue.enqueue(
+            effect=PhaseProgressionEffect(),
+            target=self.game_state.current_player,
+            context={'game_state': self.game_state},
+            priority=ActionPriority.NORMAL,
+            source_description="Phase transition to SET"
+        )
+
+    def _queue_set_phase_effects(self) -> None:
+        """Queue individual set phase effects."""
+        from ..models.abilities.composable.effects import PhaseProgressionEffect
+        from .action_queue import ActionPriority
+        
+        # SET phase currently has no effects, just transition to DRAW
+        self.execution_engine.action_queue.enqueue(
+            effect=PhaseProgressionEffect(),
+            target=self.game_state.current_player,
+            context={'game_state': self.game_state},
+            priority=ActionPriority.NORMAL,
+            source_description="Phase transition to DRAW"
+        )
+
+    def _queue_draw_phase_effects(self) -> None:
+        """Queue individual draw phase effects."""
+        from ..models.abilities.composable.effects import DrawCards, PhaseProgressionEffect
+        from .action_queue import ActionPriority
+        
+        # Get draw step events from phase management
+        draw_events = self.game_state._phase_management.draw_step(self.game_state)
+        
+        # Queue individual effects for each draw event
+        for event_data in draw_events:
+            event_type = event_data['event']
+            context = event_data['context']
+            
+            if event_type.value == 'card_drawn':
+                if not context.get('draw_failed'):
+                    # Queue DrawCards effect
+                    self.execution_engine.action_queue.enqueue(
+                        effect=DrawCards(1),
+                        target=self.game_state.current_player,
+                        context={'game_state': self.game_state},
+                        priority=ActionPriority.NORMAL,
+                        source_description="Draw phase card draw"
+                    )
+            elif event_type.value == 'draw_step':
+                # Skip draw for first turn first player
+                # No effect needed, just log
+                pass
+        
+        # Finally, queue phase transition to PLAY
+        self.execution_engine.action_queue.enqueue(
+            effect=PhaseProgressionEffect(),
+            target=self.game_state.current_player,
+            context={'game_state': self.game_state},
+            priority=ActionPriority.NORMAL,
+            source_description="Phase transition to PLAY"
+        )
+
+    def _queue_draw_phase_default_action(self) -> None:
+        """Queue appropriate default action for DRAW phase."""
+        # Check if card has been drawn this turn
+        if not self.game_state.card_drawn_this_turn:
+            # Check first turn exception
+            if self._is_first_turn_first_player():
+                # Skip draw on first player's first turn
+                self.game_state.card_drawn_this_turn = True  # Mark as "drawn" to progress
+                self._queue_phase_progression()
+            else:
+                # Queue mandatory card draw
+                self._queue_draw_card_action()
+        else:
+            # Already drawn, progress to next phase
+            self._queue_phase_progression()
+
+    def _is_first_turn_first_player(self) -> bool:
+        """Check if this is the first player's first turn (no draw)."""
+        # Only the very first player on the very first turn skips the draw
+        # Turn 1, Player 0 = skip draw
+        # Turn 1, Player 1 = draw normally
+        return (self.game_state.turn_number == 1 and 
+                self.game_state.current_player_index == 0)
+
+    def _queue_draw_card_action(self) -> None:
+        """Queue the mandatory draw card action for DRAW phase."""
+        from ..models.abilities.composable.effects import DrawCards
+        from .action_queue import ActionPriority
+        
+        self.execution_engine.action_queue.enqueue(
+            effect=DrawCards(1),
+            target=self.game_state.current_player,
+            context={'game_state': self.game_state, 'mandatory_draw': True},
+            priority=ActionPriority.NORMAL,
+            source_description="Mandatory draw phase card draw"
+        )
+
+    def _queue_phase_progression(self) -> None:
+        """Queue phase progression effect (don't execute)."""
+        if self.execution_engine:
+            from ..models.abilities.composable.effects import PhaseProgressionEffect
+            from .action_queue import ActionPriority
+            self.execution_engine.action_queue.enqueue(
+                effect=PhaseProgressionEffect(),
+                target=self.game_state.current_player,
+                context={
+                    'game_state': self.game_state, 
+                    'action_executor': getattr(self.execution_engine, 'action_executor', None)
+                },
+                priority=ActionPriority.NORMAL,
+                source_description="Phase progression"
+            )
+    
+    def _create_message_from_result(self, result) -> GameMessage:
+        """Create a message immediately from effect result."""
+        if not result or not result.success:
+            if result and hasattr(result, 'queued_action'):
+                
+                # Block the failed action temporarily to prevent infinite loops
+                self._block_failed_action(result)
+                
+            msg = StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step="action_error"
+            )
+            return msg
+        
+        # Extract effect data for message creation
+        executed_action = result.queued_action
+        effect_data = self._extract_effect_data(executed_action, result)
+        
+        step_description = executed_action.source_description if executed_action and executed_action.source_description else f"action_{result.action_id}"
+        
+        msg = StepExecutedMessage(
+            type=MessageType.STEP_EXECUTED,
+            player=self.game_state.current_player,
+            step=step_description,
+            event_data=effect_data
+        )
+        # Also set effect_data for compatibility with display logic
+        msg.effect_data = effect_data
+        return msg
+    
+    def _extract_effect_data(self, executed_action, result) -> dict:
+        """Extract structured data about an executed effect for UI formatting."""
+        if not executed_action:
+            return {"type": "unknown"}
+        
+        from ..models.abilities.composable.effects import (
+            DiscardCard, GainLoreEffect, DrawCards, BanishCharacter, 
+            ReturnToHand, ExertCharacter, ReadyCharacter, RemoveDamageEffect,
+            ChallengeEffect, PhaseProgressionEffect, InkCardEffect, PlayCharacterEffect,
+            ReadyInk
+        )
+        
+        effect = executed_action.effect
+        target = executed_action.target
+        
+        # Extract structured data based on effect type
+        if isinstance(effect, DiscardCard):
+            card_name = getattr(target, 'name', str(target))
+            if hasattr(target, 'controller') and target.controller:
+                player_name = getattr(target.controller, 'name', 'Unknown Player')
+            else:
+                context_player = executed_action.context.get('player')
+                if context_player and hasattr(context_player, 'name'):
+                    player_name = context_player.name
+                else:
+                    player_name = 'Unknown Player'
+            
+            return {
+                "type": "discard_card",
+                "card_name": card_name,
+                "player_name": player_name,
+                "target": target
+            }
+        
+        elif isinstance(effect, GainLoreEffect):
+            return {
+                "type": "gain_lore",
+                "amount": effect.amount,
+                "target": target
+            }
+        
+        elif isinstance(effect, DrawCards):
+            return {
+                "type": "draw_cards",
+                "count": effect.count,
+                "target": target,
+                "drawn_cards": getattr(effect, '_drawn_cards', [])
+            }
+        
+        elif isinstance(effect, BanishCharacter):
+            return {
+                "type": "banish_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, ReturnToHand):
+            return {
+                "type": "return_to_hand",
+                "card_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, ExertCharacter):
+            return {
+                "type": "exert_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, ReadyCharacter):
+            return {
+                "type": "ready_character",
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, RemoveDamageEffect):
+            return {
+                "type": "remove_damage",
+                "amount": effect.amount,
+                "character_name": getattr(target, 'name', str(target)),
+                "target": target
+            }
+        
+        elif isinstance(effect, ChallengeEffect):
+            # Return the challenge result data that the UI expects
+            return {
+                "type": "challenge",
+                "context": effect._challenge_result if hasattr(effect, '_challenge_result') and effect._challenge_result else {},
+                "attacker": effect.attacker,
+                "defender": effect.defender,
+                "attacker_name": getattr(effect.attacker, 'name', 'Unknown Character'),
+                "defender_name": getattr(effect.defender, 'name', 'Unknown Character')
+            }
+        
+        elif isinstance(effect, PhaseProgressionEffect):
+            # Phase transition effects should show the phase change, not "played a card"
+            return {
+                "type": "phase_transition",
+                "previous_phase": getattr(effect, '_previous_phase', None),
+                "new_phase": getattr(effect, '_new_phase', None),
+                "player": getattr(effect, '_player', None) or target
+            }
+        
+        elif isinstance(effect, InkCardEffect):
+            return {
+                "type": "ink_card",
+                "card_name": getattr(effect.card, 'name', 'Unknown Card'),
+                "card": effect.card,  # Include full card object for detailed display
+                "player": getattr(effect, '_player', None) or target
+            }
+        
+        elif isinstance(effect, PlayCharacterEffect):
+            return {
+                "type": "play_character",
+                "character_name": getattr(effect.card, 'name', 'Unknown Character'),
+                "character": effect.card,  # Include full card object for detailed display
+                "player": getattr(effect, '_player', None) or target
+            }
+        
+        elif isinstance(effect, ReadyInk):
+            return {
+                "type": "ready_ink",
+                "ink_count": len(getattr(effect, 'readied_cards', [])),
+                "player": target
+            }
+        
+        elif isinstance(effect, ReadyInkReportEffect):
+            return {
+                "type": "ready_ink",
+                "ink_count": effect.ink_count,
+                "player": target
+            }
+        
+        elif isinstance(effect, ReadyCharacterReportEffect):
+            return {
+                "type": "ready_character",
+                "character_name": effect.character_name,
+                "character": effect.character,  # Include full character object
+                "player": target
+            }
+        
+        else:
+            # Generic effect data
+            return {
+                "type": "generic",
+                "effect_class": type(effect).__name__,
+                "effect_str": str(effect),
+                "target_name": getattr(target, 'name', str(target)),
+                "target": target,
+                "source_description": executed_action.source_description
+            }
+    
+    def _block_failed_action(self, result) -> None:
+        """Block a failed action temporarily to prevent infinite loops."""
+        if not result or not hasattr(result, 'queued_action') or not result.queued_action:
+            return
+        
+        executed_action = result.queued_action
+        effect = executed_action.effect
+        
+        # Import effect types
+        from ..models.abilities.composable.effects import (
+            PlayCharacterEffect, InkCardEffect, PlayActionEffect, 
+            PlayItemEffect, QuestEffect, ChallengeEffect
+        )
+        
+        # Map effect types to actions and extract parameters
+        if isinstance(effect, PlayCharacterEffect):
+            action = "play_character"
+            parameters = {'card': effect.card}
+        elif isinstance(effect, InkCardEffect):
+            action = "play_ink"
+            parameters = {'card': effect.card}
+        elif isinstance(effect, PlayActionEffect):
+            action = "play_action"
+            parameters = {'card': effect.card}
+        elif isinstance(effect, PlayItemEffect):
+            action = "play_item"
+            parameters = {'card': effect.card}
+        elif isinstance(effect, QuestEffect):
+            action = "quest_character"
+            parameters = {'character': effect.character}
+        elif isinstance(effect, ChallengeEffect):
+            action = "challenge_character"
+            parameters = {'attacker': effect.attacker, 'defender': effect.defender}
+        else:
+            # Unknown effect type, can't block
+            print(f"🐛 Cannot block unknown effect type: {type(effect).__name__}")
+            return
+        
+        # Block the action
+        self.validator.block_action_temporarily(action, parameters)
+    

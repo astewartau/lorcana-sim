@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Any, Optional
-from ..models.game.game_state import GameAction
+# NOTE: GameAction import removed in Phase 4
 
 
 class ActionResultType(Enum):
@@ -36,13 +36,13 @@ class ActionResultType(Enum):
 class ActionResult:
     """Structured result from executing a game action."""
     success: bool
-    action_type: GameAction
+    action_type: str  # NOTE: Changed from GameAction to string in Phase 4
     result_type: ActionResultType
     data: Dict[str, Any] = field(default_factory=dict)
     error_message: Optional[str] = None
     
     @classmethod
-    def success_result(cls, action_type: GameAction, result_type: ActionResultType, **data) -> 'ActionResult':
+    def success_result(cls, action_type: str, result_type: ActionResultType, **data) -> 'ActionResult':
         """Create a successful action result."""
         return cls(
             success=True,
@@ -52,7 +52,7 @@ class ActionResult:
         )
     
     @classmethod
-    def failure_result(cls, action_type: GameAction, error_message: str) -> 'ActionResult':
+    def failure_result(cls, action_type: str, error_message: str) -> 'ActionResult':
         """Create a failed action result."""
         return cls(
             success=False,

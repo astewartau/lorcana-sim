@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional, List, Any, Dict, Union
-from ..models.game.game_state import Player, Phase, GameAction
+from ..models.game.game_state import Player, Phase
 from ..models.cards.base_card import Card
 from ..models.cards.character_card import CharacterCard
 from .choice_system import PlayerChoice
@@ -20,7 +20,7 @@ class MessageType(Enum):
 @dataclass
 class LegalAction:
     """Represents a legal action that can be taken."""
-    action: GameAction
+    action: str  # NOTE: Changed from GameAction to string in Phase 4
     target: Optional[Union[Card, CharacterCard]] = None
     parameters: Dict[str, Any] = field(default_factory=dict)
 

@@ -28,8 +28,6 @@ class Player:
     # Resources
     lore: int = 0
     
-    # Turn State
-    ink_used_this_turn: int = 0
     
     @property
     def total_ink(self) -> int:
@@ -39,7 +37,7 @@ class Player:
     @property
     def available_ink(self) -> int:
         """Ink available to spend this turn."""
-        return self.total_ink - self.ink_used_this_turn
+        return sum(1 for card in self.inkwell if not card.exerted)
     
     @property
     def ink_by_color(self) -> Dict[CardColor, int]:
@@ -113,8 +111,8 @@ class Player:
         # Set the controller when the character is played
         character.controller = self
         self.characters_in_play.append(character)
-        self.spend_ink(ink_cost)
-        return True
+        exerted = self.spend_ink(ink_cost)
+        return len(exerted) == ink_cost
     
     def play_action(self, action: ActionCard, ink_cost: int) -> bool:
         """Play an action card."""
@@ -123,8 +121,8 @@ class Player:
         
         self.hand.remove(action)
         self.discard_pile.append(action)
-        self.spend_ink(ink_cost)
-        return True
+        exerted = self.spend_ink(ink_cost)
+        return len(exerted) == ink_cost
     
     def play_item(self, item: ItemCard, ink_cost: int) -> bool:
         """Play an item card."""
@@ -133,19 +131,30 @@ class Player:
         
         self.hand.remove(item)
         self.items_in_play.append(item)
-        self.spend_ink(ink_cost)
-        return True
+        exerted = self.spend_ink(ink_cost)
+        return len(exerted) == ink_cost
     
-    def spend_ink(self, amount: int) -> bool:
-        """Spend ink for playing cards/abilities."""
-        if self.available_ink >= amount:
-            self.ink_used_this_turn += amount
-            return True
-        return False
+    def spend_ink(self, amount: int) -> List[Card]:
+        """Spend ink for playing cards/abilities.
+        
+        Returns:
+            List of cards that were exerted as ink.
+        """
+        available_cards = [card for card in self.inkwell if not card.exerted]
+        if len(available_cards) < amount:
+            return []
+        
+        # Exert the first X available cards
+        exerted_cards = []
+        for card in available_cards[:amount]:
+            card.exerted = True
+            exerted_cards.append(card)
+        
+        return exerted_cards
     
     def reset_turn_state(self) -> None:
         """Reset state at start of turn."""
-        self.ink_used_this_turn = 0
+        pass  # Ink readying is now handled by ReadyInk effect
     
     def gain_lore(self, amount: int) -> None:
         """Gain lore points."""
@@ -168,7 +177,10 @@ class Player:
         return False
     
     def ready_all_characters(self) -> None:
-        """Ready all exerted characters (start of turn)."""
+        """Ready all exerted characters (start of turn).
+        
+        Note: Ink cards are readied separately using ReadyInk effect.
+        """
         for character in self.characters_in_play:
             character.ready()
     
@@ -237,3 +249,7 @@ class Player:
     def __str__(self) -> str:
         """String representation of the player."""
         return f"{self.name} ({self.lore} lore, {self.hand_size} cards in hand, {self.available_ink} ink)"
+    
+    def __repr__(self) -> str:
+        """Use the same representation as __str__ for cleaner output in collections."""
+        return self.__str__()

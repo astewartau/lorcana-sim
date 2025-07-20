@@ -1,7 +1,7 @@
 """Action execution module for the game engine."""
 
 from typing import Dict, Any, Tuple, Optional, List
-from ..models.game.game_state import GameState, GameAction, Phase
+from ..models.game.game_state import GameState, Phase
 from ..models.cards.character_card import CharacterCard
 from ..models.cards.action_card import ActionCard
 from ..models.cards.item_card import ItemCard
@@ -25,26 +25,26 @@ class ActionExecutor:
         self.damage_calculator = damage_calculator
         self.choice_manager = choice_manager
     
-    def execute_action(self, action: GameAction, parameters: Dict[str, Any]) -> ActionResult:
+    def execute_action(self, action: str, parameters: Dict[str, Any]) -> ActionResult:
         """Execute a game action and return the result."""
         # Dispatch to appropriate action handler
-        if action == GameAction.PLAY_INK:
+        if action == "play_ink":
             return self._execute_play_ink(parameters)
-        elif action == GameAction.PLAY_CHARACTER:
+        elif action == "play_character":
             return self._execute_play_character(parameters)
-        elif action == GameAction.PLAY_ACTION:
+        elif action == "play_action":
             return self._execute_play_action(parameters)
-        elif action == GameAction.PLAY_ITEM:
+        elif action == "play_item":
             return self._execute_play_item(parameters)
-        elif action == GameAction.QUEST_CHARACTER:
+        elif action == "quest_character":
             return self._execute_quest_character(parameters)
-        elif action == GameAction.CHALLENGE_CHARACTER:
+        elif action == "challenge_character":
             return self._execute_challenge(parameters)
-        elif action == GameAction.SING_SONG:
+        elif action == "sing_song":
             return self._execute_sing_song(parameters)
-        elif action == GameAction.PROGRESS:
+        elif action == "progress":
             return self._execute_progress(parameters)
-        elif action == GameAction.PASS_TURN:
+        elif action == "pass_turn":
             return self._execute_pass_turn(parameters)
         else:
             return ActionResult(
@@ -64,7 +64,7 @@ class ActionExecutor:
         if not player.play_ink(card):
             return ActionResult(
                 success=False,
-                action_type=GameAction.PLAY_INK,
+                action_type="play_ink",
                 result_type=ActionResultType.ACTION_FAILED,
                 error_message="Failed to play ink"
             )
@@ -73,7 +73,7 @@ class ActionExecutor:
         self.game_state.ink_played_this_turn = True
         
         # Record the action
-        self.game_state.record_action(GameAction.PLAY_INK)
+        self.game_state.record_action("play_ink")
         
         # Trigger INK_PLAYED event
         ink_context = EventContext(
@@ -87,7 +87,7 @@ class ActionExecutor:
         
         return ActionResult(
             success=True,
-            action_type=GameAction.PLAY_INK,
+            action_type="play_ink",
             result_type=ActionResultType.INK_PLAYED,
             data={'card': card, 'player': player}
         )
@@ -97,8 +97,6 @@ class ActionExecutor:
         card = parameters.get('card')
         player = self.game_state.current_player
         
-        print(f"DEBUG: _execute_play_character called for {card.name}")
-        
         # Get the modified cost for the card
         modified_cost = self.game_state.get_modified_card_cost(card)
         
@@ -107,7 +105,7 @@ class ActionExecutor:
         if not player.play_character(card, modified_cost):
             return ActionResult(
                 success=False,
-                action_type=GameAction.PLAY_CHARACTER,
+                action_type="play_character",
                 result_type=ActionResultType.ACTION_FAILED,
                 error_message="Failed to play character"
             )
@@ -115,21 +113,14 @@ class ActionExecutor:
         # Set the turn played
         card.turn_played = self.game_state.turn_number
         
-        print(f"DEBUG: Successfully played character {card.name}")
-        print(f"DEBUG: Setting turn_played for {card.name}")
-        
         # Register any conditional effects the card has
         self.game_state.register_card_conditional_effects(card)
         
         # Register composable abilities
         if hasattr(card, 'composable_abilities') and card.composable_abilities:
-            print(f"DEBUG: About to register composable abilities for {card.name}")
-            print(f"DEBUG: Character {card.name} has {len(card.composable_abilities)} composable abilities")
             for ability in card.composable_abilities:
-                print(f"DEBUG: Registering ability {ability.name}")
                 if hasattr(ability, 'register_with_event_manager'):
                     ability.register_with_event_manager(self.event_manager, card)
-                    print(f"DEBUG: Registering ability {ability.name} for events: {ability.triggers}")
         
         # Trigger CHARACTER_ENTERS_PLAY event
         enter_play_context = EventContext(
@@ -148,11 +139,11 @@ class ActionExecutor:
         ability_messages = self.event_manager.trigger_event(enter_play_context)
         
         # Record the action
-        self.game_state.record_action(GameAction.PLAY_CHARACTER)
+        self.game_state.record_action("play_character")
         
         return ActionResult(
             success=True,
-            action_type=GameAction.PLAY_CHARACTER,
+            action_type="play_character",
             result_type=ActionResultType.CHARACTER_PLAYED,
             data={
                 'card': card,
@@ -170,10 +161,12 @@ class ActionExecutor:
         
         # Check cost
         if not player.can_afford(card):
-            return ActionResult(success=False, action_type=GameAction.PLAY_ACTION, result_type=ActionResultType.ACTION_FAILED, error_message="Not enough ink to play this action")
+            return ActionResult(success=False, action_type="play_action", result_type=ActionResultType.ACTION_FAILED, error_message="Not enough ink to play this action")
         
         # Spend ink
-        player.spend_ink(card.cost)
+        exerted_cards = player.spend_ink(card.cost)
+        if len(exerted_cards) != card.cost:
+            return ActionResult(success=False, action_type="play_action", result_type=ActionResultType.ACTION_FAILED, error_message="Failed to spend ink")
         
         # Remove from hand
         player.hand.remove(card)
@@ -183,11 +176,11 @@ class ActionExecutor:
         player.discard.append(card)
         
         # Record the action
-        self.game_state.record_action(GameAction.PLAY_ACTION)
+        self.game_state.record_action("play_action")
         
         return ActionResult(
             success=True,
-            action_type=GameAction.PLAY_ACTION,
+            action_type="play_action",
             result_type=ActionResultType.ACTION_PLAYED,
             data={'card': card, 'player': player}
         )
@@ -201,21 +194,23 @@ class ActionExecutor:
         
         # Check cost
         if not player.can_afford(card):
-            return ActionResult(success=False, action_type=GameAction.PLAY_ITEM, result_type=ActionResultType.ACTION_FAILED, error_message="Not enough ink to play this item")
+            return ActionResult(success=False, action_type="play_item", result_type=ActionResultType.ACTION_FAILED, error_message="Not enough ink to play this item")
         
         # Spend ink
-        player.spend_ink(card.cost)
+        exerted_cards = player.spend_ink(card.cost)
+        if len(exerted_cards) != card.cost:
+            return ActionResult(success=False, action_type="play_item", result_type=ActionResultType.ACTION_FAILED, error_message="Failed to spend ink")
         
         # Remove from hand and add to play
         player.hand.remove(card)
         player.items_in_play.append(card)
         
         # Record the action
-        self.game_state.record_action(GameAction.PLAY_ITEM)
+        self.game_state.record_action("play_item")
         
         return ActionResult(
             success=True,
-            action_type=GameAction.PLAY_ITEM,
+            action_type="play_item",
             result_type=ActionResultType.ITEM_PLAYED,
             data={'card': card, 'player': player}
         )
@@ -229,7 +224,7 @@ class ActionExecutor:
         
         # Check if character has already acted this turn  
         if self.game_state.has_character_acted_this_turn(character.id):
-            return ActionResult(success=False, action_type=GameAction.QUEST_CHARACTER, result_type=ActionResultType.ACTION_FAILED, error_message="This character has already acted this turn")
+            return ActionResult(success=False, action_type="quest_character", result_type=ActionResultType.ACTION_FAILED, error_message="This character has already acted this turn")
         
         # Exert the character
         character.exerted = True
@@ -255,11 +250,11 @@ class ActionExecutor:
         player.lore += lore_gained
         
         # Record the action
-        self.game_state.record_action(GameAction.QUEST_CHARACTER)
+        self.game_state.record_action("quest_character")
         
         return ActionResult(
             success=True,
-            action_type=GameAction.QUEST_CHARACTER,
+            action_type="quest_character",
             result_type=ActionResultType.CHARACTER_QUESTED,
             data={
                 'character': character,
@@ -282,7 +277,7 @@ class ActionExecutor:
         
         # Check if attacker has already acted this turn
         if self.game_state.has_character_acted_this_turn(attacker.id):
-            return ActionResult(success=False, action_type=GameAction.CHALLENGE_CHARACTER, result_type=ActionResultType.ACTION_FAILED, error_message="This character has already acted this turn")
+            return ActionResult(success=False, action_type="challenge_character", result_type=ActionResultType.ACTION_FAILED, error_message="This character has already acted this turn")
         
         # Mark attacker as having acted this turn
         self.game_state.mark_character_acted(attacker.id)
@@ -320,87 +315,9 @@ class ActionExecutor:
         defender.damage += damage_to_defender
         attacker.damage += damage_to_attacker
         
-        # Check if either character is banished
-        defender_banished = defender.damage >= defender.current_willpower
-        attacker_banished = attacker.damage >= attacker.current_willpower
-        
-        banished_characters = []
-        
-        # Handle defender banishment
-        if defender_banished:
-            opponent.characters_in_play.remove(defender)
-            opponent.discard.append(defender)
-            banished_characters.append(('defender', defender))
-            
-            # Unregister composable abilities
-            if hasattr(defender, 'composable_abilities') and defender.composable_abilities:
-                for ability in defender.composable_abilities:
-                    if hasattr(ability, 'unregister_from_event_manager'):
-                        ability.unregister_from_event_manager(self.event_manager, defender)
-            
-            # Unregister conditional effects
-            self.game_state.unregister_card_conditional_effects(defender)
-            
-            # Trigger CHARACTER_BANISHED event
-            banish_context = EventContext(
-                event_type=GameEvent.CHARACTER_BANISHED,
-                player=opponent,
-                game_state=self.game_state,
-                source=defender,
-                additional_data={
-                    'banished_character': defender,
-                    'banish_source': 'challenge',
-                    'banishing_character': attacker
-                }
-            )
-            self.event_manager.trigger_event(banish_context)
-            
-            # Also trigger CHARACTER_BANISHED_IN_CHALLENGE for specific abilities
-            challenge_banish_context = EventContext(
-                event_type=GameEvent.CHARACTER_BANISHED_IN_CHALLENGE,
-                player=current_player,  # The player who banished the character
-                game_state=self.game_state,
-                source=attacker,  # The character who did the banishing
-                target=defender,  # The character who was banished
-                additional_data={
-                    'banished_character': defender,
-                    'banishing_character': attacker,
-                    'damage_dealt': damage_to_defender
-                }
-            )
-            self.event_manager.trigger_event(challenge_banish_context)
-        
-        # Handle attacker banishment
-        if attacker_banished:
-            current_player.characters_in_play.remove(attacker)
-            current_player.discard.append(attacker)
-            banished_characters.append(('attacker', attacker))
-            
-            # Unregister composable abilities
-            if hasattr(attacker, 'composable_abilities') and attacker.composable_abilities:
-                for ability in attacker.composable_abilities:
-                    if hasattr(ability, 'unregister_from_event_manager'):
-                        ability.unregister_from_event_manager(self.event_manager, attacker)
-            
-            # Unregister conditional effects
-            self.game_state.unregister_card_conditional_effects(attacker)
-            
-            # Trigger CHARACTER_BANISHED event
-            banish_context = EventContext(
-                event_type=GameEvent.CHARACTER_BANISHED,
-                player=current_player,
-                game_state=self.game_state,
-                source=attacker,
-                additional_data={
-                    'banished_character': attacker,
-                    'banish_source': 'challenge',
-                    'banishing_character': defender
-                }
-            )
-            self.event_manager.trigger_event(banish_context)
         
         # Handle CHARACTER_TAKES_DAMAGE events
-        if damage_to_defender > 0 and not defender_banished:
+        if damage_to_defender > 0:
             damage_context = EventContext(
                 event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
                 player=opponent,
@@ -414,7 +331,7 @@ class ActionExecutor:
             )
             self.event_manager.trigger_event(damage_context)
         
-        if damage_to_attacker > 0 and not attacker_banished:
+        if damage_to_attacker > 0:
             damage_context = EventContext(
                 event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
                 player=current_player,
@@ -429,25 +346,24 @@ class ActionExecutor:
             self.event_manager.trigger_event(damage_context)
         
         # Record the action
-        self.game_state.record_action(GameAction.CHALLENGE_CHARACTER)
+        self.game_state.record_action("challenge_character")
         
-        return ActionResult(
+        result = ActionResult(
             success=True,
-            action_type=GameAction.CHALLENGE_CHARACTER,
+            action_type="challenge_character",
             result_type=ActionResultType.CHARACTER_CHALLENGED,
             data={
                 'attacker': attacker,
                 'defender': defender,
                 'damage_to_attacker': damage_to_attacker,
                 'damage_to_defender': damage_to_defender,
-                'attacker_banished': attacker_banished,
-                'defender_banished': defender_banished,
                 'original_attacker_strength': original_attacker_strength,
                 'original_defender_strength': original_defender_strength,
                 'modified_attacker_strength': attacker.current_strength,
                 'modified_defender_strength': defender.current_strength
             }
         )
+        return result
     
     def _execute_sing_song(self, parameters: Dict[str, Any]) -> ActionResult:
         """Execute singing a song with a character."""
@@ -459,7 +375,7 @@ class ActionExecutor:
         
         # Check if character has already acted this turn
         if self.game_state.has_character_acted_this_turn(character.id):
-            return ActionResult(success=False, action_type=GameAction.SING_SONG, result_type=ActionResultType.ACTION_FAILED, error_message="This character has already acted this turn")
+            return ActionResult(success=False, action_type="sing_song", result_type=ActionResultType.ACTION_FAILED, error_message="This character has already acted this turn")
         
         # Mark character as having acted this turn
         self.game_state.mark_character_acted(character.id)
@@ -475,11 +391,11 @@ class ActionExecutor:
         player.discard.append(song)
         
         # Record the action
-        self.game_state.record_action(GameAction.SING_SONG)
+        self.game_state.record_action("sing_song")
         
         return ActionResult(
             success=True,
-            action_type=GameAction.SING_SONG,
+            action_type="sing_song",
             result_type=ActionResultType.SONG_SUNG,
             data={
                 'character': character,
@@ -500,9 +416,18 @@ class ActionExecutor:
             # Advance to SET phase
             self.game_state.advance_phase()
             
+            # Trigger SET_PHASE event
+            phase_context = EventContext(
+                event_type=GameEvent.SET_PHASE,
+                player=self.game_state.current_player,
+                game_state=self.game_state,
+                additional_data={'phase': 'set'}
+            )
+            self.event_manager.trigger_event(phase_context)
+            
             return ActionResult(
                 success=True,
-                action_type=GameAction.PROGRESS,
+                action_type="progress",
                 result_type=ActionResultType.PHASE_ADVANCED,
                 data={
                     'previous_phase': Phase.READY,
@@ -518,9 +443,18 @@ class ActionExecutor:
             # Advance to DRAW phase
             self.game_state.advance_phase()
             
+            # Trigger DRAW_PHASE event
+            phase_context = EventContext(
+                event_type=GameEvent.DRAW_PHASE,
+                player=self.game_state.current_player,
+                game_state=self.game_state,
+                additional_data={'phase': 'draw'}
+            )
+            self.event_manager.trigger_event(phase_context)
+            
             return ActionResult(
                 success=True,
-                action_type=GameAction.PROGRESS,
+                action_type="progress",
                 result_type=ActionResultType.PHASE_ADVANCED,
                 data={
                     'previous_phase': Phase.SET,
@@ -581,9 +515,18 @@ class ActionExecutor:
             # Advance to PLAY phase
             self.game_state.advance_phase()
             
+            # Trigger PLAY_PHASE event
+            phase_context = EventContext(
+                event_type=GameEvent.PLAY_PHASE,
+                player=self.game_state.current_player,
+                game_state=self.game_state,
+                additional_data={'phase': 'play'}
+            )
+            self.event_manager.trigger_event(phase_context)
+            
             return ActionResult(
                 success=True,
-                action_type=GameAction.PROGRESS,
+                action_type="progress",
                 result_type=ActionResultType.PHASE_ADVANCED,
                 data={
                     'previous_phase': Phase.DRAW,
@@ -619,9 +562,18 @@ class ActionExecutor:
             )
             self.event_manager.trigger_event(turn_begin_context)
             
+            # Trigger READY_PHASE event for new turn
+            ready_phase_context = EventContext(
+                event_type=GameEvent.READY_PHASE,
+                player=new_player,
+                game_state=self.game_state,
+                additional_data={'phase': 'ready'}
+            )
+            self.event_manager.trigger_event(ready_phase_context)
+            
             return ActionResult(
                 success=True,
-                action_type=GameAction.PROGRESS,
+                action_type="progress",
                 result_type=ActionResultType.TURN_ENDED,
                 data={
                     'previous_phase': Phase.PLAY,
@@ -635,7 +587,7 @@ class ActionExecutor:
         
         return ActionResult(
             success=False,
-            action_type=GameAction.PROGRESS,
+            action_type="progress",
             result_type=ActionResultType.ACTION_FAILED,
             error_message=f"Cannot progress from phase: {current_phase}"
         )
@@ -648,13 +600,13 @@ class ActionExecutor:
         if current_phase != Phase.PLAY:
             return ActionResult(
                 success=False,
-                action_type=GameAction.PASS_TURN,
+                action_type="pass_turn",
                 result_type=ActionResultType.ACTION_FAILED,
                 error_message="Can only pass turn during play phase"
             )
         
         # Record the pass action
-        self.game_state.record_action(GameAction.PASS_TURN)
+        self.game_state.record_action("pass_turn")
         
         # Execute the same logic as progress during play phase
         previous_player = self.game_state.current_player
@@ -684,7 +636,7 @@ class ActionExecutor:
         
         return ActionResult(
             success=True,
-            action_type=GameAction.PASS_TURN,
+            action_type="pass_turn",
             result_type=ActionResultType.TURN_ENDED,
             data={
                 'previous_player': previous_player,

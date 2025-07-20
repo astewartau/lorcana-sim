@@ -73,8 +73,9 @@ class ConditionEvaluator:
             # Always evaluate on card movement/play
             should_eval = True
         elif trigger == EvaluationTrigger.STEP_EXECUTED:
-            # Evaluate on significant game steps
-            should_eval = True
+            # Only evaluate on step execution if turn or phase changed
+            # Most conditional effects should only trigger on turn/phase changes
+            should_eval = turn_changed or phase_changed
         elif trigger == EvaluationTrigger.ABILITY_RESOLVED:
             # Evaluate after abilities resolve
             should_eval = True
@@ -101,8 +102,14 @@ class ConditionEvaluator:
         self.last_evaluated_phase = game_state.current_phase.value
         
         try:
-            # Get events from zone manager evaluation
-            zone_events = game_state.evaluate_conditional_effects()
+            # Use the specific effects evaluator instead of the generic zone manager
+            from .zone_manager import ZoneManager
+            zone_manager = game_state._zone_management.zone_manager
+            zone_events = self.evaluate_specific_effects(
+                list(zone_manager.all_effects), 
+                game_state, 
+                trigger
+            )
             events.extend(zone_events)
             
             if self.debug_mode:
@@ -125,7 +132,7 @@ class ConditionEvaluator:
                                 effects: List[ConditionalEffect], 
                                 game_state: 'GameState',
                                 trigger: EvaluationTrigger) -> List[Dict]:
-        """Evaluate specific conditional effects and return any events generated."""
+        """Evaluate specific conditional effects and return events for abilities that actually trigger."""
         events = []
         
         for effect in effects:
@@ -141,25 +148,30 @@ class ConditionEvaluator:
                 
                 # Force evaluation for specific effects
                 if trigger == EvaluationTrigger.FORCE_EVALUATE:
+                    print(f"Force evaluating effect {effect.effect_id} in {game_state.current_phase.value} phase")
                     effect.last_evaluation_turn = -1
                 
                 # Skip if we don't need to evaluate
                 if not effect.should_evaluate(game_state):
+                    print(f"Skipping evaluation for effect {effect.effect_id} in {game_state.current_phase.value} phase")
                     continue
                 
                 # Evaluate condition
+                print(f"Evaluating effect {effect.effect_id} in {game_state.current_phase.value} phase")
                 should_be_active = effect.evaluate_condition(game_state)
                 
                 if should_be_active and not effect.is_active:
-                    # Apply effect
+                    print(f"Effect {effect.effect_id} is now active in {game_state.current_phase.value} phase")
+                    # Apply effect - only return events for abilities that actually trigger
                     event = effect.apply_effect(game_state)
                     if event:
                         events.append(event)
                 elif not should_be_active and effect.is_active:
-                    # Remove effect
-                    event = effect.remove_effect(game_state)
-                    if event:
-                        events.append(event)
+                    print(f"Effect {effect.effect_id} is no longer active in {game_state.current_phase.value} phase")
+                    # Remove effect - but don't create debug messages for abilities that stop triggering
+                    # This prevents spam of abilities that didn't actually trigger
+                    effect.remove_effect(game_state)
+                    # Note: No event added to prevent debug spam
             
             except Exception as e:
                 if self.debug_mode:

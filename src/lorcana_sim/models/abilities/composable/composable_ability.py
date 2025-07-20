@@ -44,21 +44,46 @@ class ComposableListener:
         # Select targets
         targets = self.target_selector.select(context)
         
-        # Apply effect to each target, or to None if no targets (for effects like PreventEffect)
-        if targets:
+        # Queue effect for each target instead of applying immediately (ONE EFFECT PER CALL principle)
+        action_queue = context.get('action_queue')
+        if action_queue and targets:
+            from ...engine.action_queue import ActionPriority
             for target in targets:
                 try:
-                    self.effect.apply(target, context)
+                    action_queue.enqueue(
+                        effect=self.effect,
+                        target=target,
+                        context=context,
+                        priority=ActionPriority.HIGH,  # Triggered effects go to front
+                        source_description=f"{self.name} triggered"
+                    )
                 except Exception as e:
                     # Log error but don't crash the game
                     print(f"Error applying effect {self.effect} to target {target}: {e}")
-        else:
-            # For effects that don't need targets (like PreventEffect)
+        elif action_queue:
+            # For effects that don't need targets (like PreventEffect) - queue them too
             try:
-                self.effect.apply(None, context)
+                action_queue.enqueue(
+                    effect=self.effect,
+                    target=None,
+                    context=context,
+                    priority=ActionPriority.HIGH,  # Triggered effects go to front
+                    source_description=f"{self.name} triggered (no target)"
+                )
             except Exception as e:
                 # Log error but don't crash the game
-                print(f"Error applying effect {self.effect} with no target: {e}")
+                print(f"Error queuing effect {self.effect} with no target: {e}")
+        else:
+            # Fallback: apply immediately if no action_queue available (backwards compatibility)
+            try:
+                if targets:
+                    for target in targets:
+                        self.effect.apply(target, context)
+                else:
+                    self.effect.apply(None, context)
+            except Exception as e:
+                # Log error but don't crash the game
+                print(f"Error applying effect {self.effect} (fallback): {e}")
     
     def relevant_events(self) -> List[GameEvent]:
         """Get list of events this listener cares about."""

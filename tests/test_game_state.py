@@ -4,7 +4,7 @@ import pytest
 from dataclasses import dataclass
 from typing import List
 
-from src.lorcana_sim.models.game.game_state import GameState, Phase, GameAction
+from src.lorcana_sim.models.game.game_state import GameState, Phase
 from src.lorcana_sim.models.game.player import Player
 from src.lorcana_sim.models.cards.character_card import CharacterCard
 from src.lorcana_sim.models.cards.action_card import ActionCard
@@ -15,7 +15,7 @@ from src.lorcana_sim.models.cards.base_card import Card, CardColor, Rarity
 from src.lorcana_sim.engine.move_validator import MoveValidator
 from src.lorcana_sim.engine.game_engine import GameEngine
 from src.lorcana_sim.engine.action_result import ActionResult
-from src.lorcana_sim.engine.step_system import ExecutionMode
+from src.lorcana_sim.engine.game_engine import ExecutionMode
 
 
 @pytest.fixture
@@ -219,34 +219,34 @@ class TestGameState:
         """Test action validation by phase."""
         # READY phase - progress and pass turn
         assert game_state.current_phase == Phase.READY
-        assert game_state.can_perform_action(GameAction.PROGRESS)
-        assert game_state.can_perform_action(GameAction.PASS_TURN)
-        assert not game_state.can_perform_action(GameAction.PLAY_CHARACTER)
-        assert not game_state.can_perform_action(GameAction.PLAY_INK)
+        assert game_state.can_perform_action("progress")
+        assert game_state.can_perform_action("pass_turn")
+        assert not game_state.can_perform_action("play_character")
+        assert not game_state.can_perform_action("play_ink")
         
         # SET phase - progress and pass turn
         game_state.current_phase = Phase.SET
-        assert game_state.can_perform_action(GameAction.PROGRESS)
-        assert game_state.can_perform_action(GameAction.PASS_TURN)
-        assert not game_state.can_perform_action(GameAction.PLAY_CHARACTER)
-        assert not game_state.can_perform_action(GameAction.PLAY_INK)
+        assert game_state.can_perform_action("progress")
+        assert game_state.can_perform_action("pass_turn")
+        assert not game_state.can_perform_action("play_character")
+        assert not game_state.can_perform_action("play_ink")
         
         # DRAW phase - progress and pass turn
         game_state.current_phase = Phase.DRAW
-        assert game_state.can_perform_action(GameAction.PROGRESS)
-        assert game_state.can_perform_action(GameAction.PASS_TURN)
-        assert not game_state.can_perform_action(GameAction.PLAY_CHARACTER)
-        assert not game_state.can_perform_action(GameAction.PLAY_INK)
+        assert game_state.can_perform_action("progress")
+        assert game_state.can_perform_action("pass_turn")
+        assert not game_state.can_perform_action("play_character")
+        assert not game_state.can_perform_action("play_ink")
         
         # PLAY phase - most actions
         game_state.current_phase = Phase.PLAY
-        assert game_state.can_perform_action(GameAction.PLAY_CHARACTER)
-        assert game_state.can_perform_action(GameAction.PLAY_ACTION)
-        assert game_state.can_perform_action(GameAction.QUEST_CHARACTER)
-        assert game_state.can_perform_action(GameAction.CHALLENGE_CHARACTER)
-        assert game_state.can_perform_action(GameAction.PLAY_INK)
-        assert game_state.can_perform_action(GameAction.PROGRESS)
-        assert game_state.can_perform_action(GameAction.PASS_TURN)
+        assert game_state.can_perform_action("play_character")
+        assert game_state.can_perform_action("play_action")
+        assert game_state.can_perform_action("quest_character")
+        assert game_state.can_perform_action("challenge_character")
+        assert game_state.can_perform_action("play_ink")
+        assert game_state.can_perform_action("progress")
+        assert game_state.can_perform_action("pass_turn")
 
 
 class TestPlayer:
@@ -419,35 +419,35 @@ class TestMoveValidator:
         game_state.current_phase = Phase.READY
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
-        assert GameAction.PROGRESS in action_types
-        assert GameAction.PASS_TURN in action_types
-        assert GameAction.PLAY_INK not in action_types
+        assert "progress" in action_types
+        assert "pass_turn" in action_types
+        assert "play_ink" not in action_types
         
         # SET phase
         game_state.current_phase = Phase.SET
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
-        assert GameAction.PROGRESS in action_types
-        assert GameAction.PASS_TURN in action_types
-        assert GameAction.PLAY_INK not in action_types
+        assert "progress" in action_types
+        assert "pass_turn" in action_types
+        assert "play_ink" not in action_types
         
         # DRAW phase
         game_state.current_phase = Phase.DRAW
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
-        assert GameAction.PROGRESS in action_types
-        assert GameAction.PASS_TURN in action_types
-        assert GameAction.PLAY_INK not in action_types
+        assert "progress" in action_types
+        assert "pass_turn" in action_types
+        assert "play_ink" not in action_types
         
         # PLAY phase - give player enough ink to play cards
         game_state.current_phase = Phase.PLAY
         game_state.current_player.inkwell = [game_state.current_player.hand[0]] * 5  # Enough ink
         actions = validator.get_all_legal_actions()
         action_types = [action for action, _ in actions]
-        assert GameAction.PROGRESS in action_types
-        assert GameAction.PASS_TURN in action_types
-        assert GameAction.PLAY_CHARACTER in action_types
-        assert GameAction.PLAY_INK in action_types
+        assert "progress" in action_types
+        assert "pass_turn" in action_types
+        assert "play_character" in action_types
+        assert "play_ink" in action_types
 
 
 class TestGameEngine:
@@ -466,12 +466,12 @@ class TestGameEngine:
         
         # Should succeed
         result = engine.execute_action(
-            GameAction.PLAY_INK,
+            "play_ink",
             {'card': mock_character}
         )
         
         assert result.success
-        assert result.action_type == GameAction.PLAY_INK
+        assert result.action_type == "play_ink"
         assert game_state.ink_played_this_turn
         assert mock_character in game_state.current_player.inkwell
     
@@ -485,12 +485,12 @@ class TestGameEngine:
         
         # Should succeed
         result = engine.execute_action(
-            GameAction.PLAY_CHARACTER,
+            "play_character",
             {'card': mock_character}
         )
         
         assert result.success
-        assert result.action_type == GameAction.PLAY_CHARACTER
+        assert result.action_type == "play_character"
         assert mock_character in game_state.current_player.characters_in_play
     
     def test_execute_invalid_action(self, game_state, mock_character):
@@ -499,7 +499,7 @@ class TestGameEngine:
         game_state.current_phase = Phase.READY  # Can't play characters in ready phase
         
         result = engine.execute_action(
-            GameAction.PLAY_CHARACTER,
+            "play_character",
             {'card': mock_character}
         )
         

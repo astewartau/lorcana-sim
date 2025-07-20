@@ -23,20 +23,7 @@ class Phase(Enum):
     PLAY = "play"        # Play phase (ink, play cards, quest, challenge)
 
 
-class GameAction(Enum):
-    """Possible player actions."""
-    PLAY_INK = "play_ink"
-    PLAY_CHARACTER = "play_character"
-    PLAY_ACTION = "play_action"
-    PLAY_ITEM = "play_item"
-    QUEST_CHARACTER = "quest_character"
-    CHALLENGE_CHARACTER = "challenge_character"
-    SING_SONG = "sing_song"
-    ACTIVATE_ABILITY = "activate_ability"
-    PROGRESS = "progress"       # Progress to next phase
-    PASS_TURN = "pass_turn"      # Pass turn to opponent
-
-
+# NOTE: GameAction enum REMOVED in Phase 4 - use direct Move→Effect conversion
 class GameResult(Enum):
     """Possible game results."""
     ONGOING = "ongoing"
@@ -56,7 +43,9 @@ class GameState:
     
     # Turn State Tracking
     ink_played_this_turn: bool = False
-    actions_this_turn: List[GameAction] = field(default_factory=list)
+    card_drawn_this_turn: bool = False  # Track if mandatory draw has occurred
+    # NOTE: Specific action tracking removed in Phase 4 - using effect tracking instead
+    actions_this_turn: List[str] = field(default_factory=list)  # Track effect descriptions
     characters_acted_this_turn: List[int] = field(default_factory=list)  # Track character IDs that have acted
     
     # Global Game Elements
@@ -196,13 +185,14 @@ class GameState:
         """Mark that a character has acted this turn."""
         self._turn_management.mark_character_acted(character_id, self)
     
-    def can_perform_action(self, action: GameAction) -> bool:
+    def can_perform_action(self, action_description: str) -> bool:
         """Check if current player can perform the given action."""
-        return self._turn_management.can_perform_action(action, self)
+        return self._turn_management.can_perform_action(action_description, self)
     
-    def record_action(self, action: GameAction) -> None:
+    def record_action(self, action_description: str) -> None:
         """Record an action for stalemate detection."""
-        self._turn_management.record_action(action, self)
+        self.actions_this_turn.append(action_description)
+        self._turn_management.record_action(action_description, self)
     
     def set_last_event(self, event_type: str, **kwargs) -> None:
         """Set the last event that occurred in the game."""

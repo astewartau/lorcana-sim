@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..game_state import GameState, GameAction, Phase
+    from ..game_state import GameState, Phase
 
 
 class TurnManagementComponent:
@@ -23,9 +23,9 @@ class TurnManagementComponent:
         if character_id not in game_state.characters_acted_this_turn:
             game_state.characters_acted_this_turn.append(character_id)
     
-    def can_perform_action(self, action: "GameAction", game_state: "GameState") -> bool:
+    def can_perform_action(self, action: str, game_state: "GameState") -> bool:
         """Check if current player can perform the given action."""
-        from ..game_state import Phase, GameAction
+        from ..game_state import Phase
         
         # Game over - no actions allowed
         if game_state.is_game_over():
@@ -33,27 +33,26 @@ class TurnManagementComponent:
         
         if game_state.current_phase == Phase.PLAY:
             return action in [
-                GameAction.PLAY_INK,
-                GameAction.PLAY_CHARACTER,
-                GameAction.PLAY_ACTION, 
-                GameAction.PLAY_ITEM,
-                GameAction.QUEST_CHARACTER,
-                GameAction.CHALLENGE_CHARACTER,
-                GameAction.SING_SONG,
-                GameAction.ACTIVATE_ABILITY,
-                GameAction.PROGRESS,
-                GameAction.PASS_TURN
+                "play_ink",
+                "play_character",
+                "play_action", 
+                "play_item",
+                "quest_character",
+                "challenge_character",
+                "sing_song",
+                "activate_ability",
+                "progress",
+                "pass_turn"
             ]
         elif game_state.current_phase in [Phase.READY, Phase.SET, Phase.DRAW]:
-            return action in [GameAction.PROGRESS, GameAction.PASS_TURN]
+            return action in ["progress", "pass_turn"]
         
         return False
     
-    def record_action(self, action: "GameAction", game_state: "GameState") -> None:
+    def record_action(self, action: str, game_state: "GameState") -> None:
         """Record an action for stalemate detection."""
-        from ..game_state import GameAction
         
-        if action == GameAction.PASS_TURN:
+        if action == "pass_turn":
             game_state.consecutive_passes += 1
         else:
             # Reset pass counter on any meaningful action

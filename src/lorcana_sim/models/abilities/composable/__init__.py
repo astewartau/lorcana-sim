@@ -5,7 +5,7 @@ from .composable_ability import ComposableAbility, ComposableListener, AbilityBu
 from .effects import (
     Effect, CompositeEffect, RepeatedEffect, ChoiceEffect, ConditionalEffect,
     StatModification, DrawCards, BanishCharacter, ReturnToHand, PreventEffect,
-    ModifyDamage, ForceRetarget, GrantProperty, NoEffect,
+    ModifyDamage, ForceRetarget, GrantProperty, NoEffect, ReadyInk,
     # Pre-built effects
     LORE_PLUS_1, LORE_PLUS_2, LORE_PLUS_3,
     STRENGTH_PLUS_1, STRENGTH_PLUS_2, STRENGTH_PLUS_3,
@@ -49,7 +49,7 @@ __all__ = [
     # Effects
     'Effect', 'CompositeEffect', 'RepeatedEffect', 'ChoiceEffect', 'ConditionalEffect',
     'StatModification', 'DrawCards', 'BanishCharacter', 'ReturnToHand', 'PreventEffect',
-    'ModifyDamage', 'ForceRetarget', 'GrantProperty', 'NoEffect',
+    'ModifyDamage', 'ForceRetarget', 'GrantProperty', 'NoEffect', 'ReadyInk',
     'LORE_PLUS_1', 'LORE_PLUS_2', 'LORE_PLUS_3',
     'STRENGTH_PLUS_1', 'STRENGTH_PLUS_2', 'STRENGTH_PLUS_3',
     'WILLPOWER_PLUS_1', 'WILLPOWER_PLUS_2', 'WILLPOWER_PLUS_3',

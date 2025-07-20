@@ -54,6 +54,9 @@ class Card:
     # Visual (optional for simulation)
     artists: List[str] = field(default_factory=list)
     
+    # Game State
+    exerted: bool = False  # Whether the card is exerted (used for ink cards and characters)
+    
     def __post_init__(self) -> None:
         """Validate card data after creation."""
         if self.cost < 0:

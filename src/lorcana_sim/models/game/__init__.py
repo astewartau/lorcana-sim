@@ -2,7 +2,7 @@
 
 from .deck import Deck, DeckCard
 from .player import Player
-from .game_state import GameState, Phase, GameAction
+from .game_state import GameState, Phase
 
 __all__ = [
     "Deck",
@@ -10,5 +10,4 @@ __all__ = [
     "Player",
     "GameState",
     "Phase",
-    "GameAction",
 ]

@@ -2,12 +2,12 @@
 
 import pytest
 
-from lorcana_sim.models.game.game_state import GameState, GameAction
+from lorcana_sim.models.game.game_state import GameState
 from lorcana_sim.models.game.player import Player
 from lorcana_sim.models.cards.character_card import CharacterCard
 from lorcana_sim.models.cards.base_card import CardColor, Rarity
 from lorcana_sim.engine.game_engine import GameEngine
-from lorcana_sim.engine.step_system import ExecutionMode
+from lorcana_sim.engine.game_engine import ExecutionMode
 
 
 def create_test_character(name: str, cost: int = 3, strength: int = 2, willpower: int = 3, lore: int = 1) -> CharacterCard:
@@ -76,12 +76,12 @@ def test_character_cannot_quest_and_challenge_same_turn():
     engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # First action: Quest with the attacker
-    quest_result = engine.execute_action(GameAction.QUEST_CHARACTER, {'character': attacker})
+    quest_result = engine.execute_action("quest_character", {'character': attacker})
     assert quest_result.success, f"Quest should succeed: {quest_result.error_message}"
     assert attacker.exerted, "Character should be exerted after questing"
     
     # Second action: Try to challenge with the same character - this should FAIL
-    challenge_result = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
+    challenge_result = engine.execute_action("challenge_character", {
         'attacker': attacker, 
         'defender': defender
     })
@@ -139,7 +139,7 @@ def test_character_cannot_challenge_and_quest_same_turn():
     engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # First action: Challenge with the attacker
-    challenge_result = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
+    challenge_result = engine.execute_action("challenge_character", {
         'attacker': attacker, 
         'defender': defender
     })
@@ -147,7 +147,7 @@ def test_character_cannot_challenge_and_quest_same_turn():
     assert attacker.exerted, "Character should be exerted after challenging"
     
     # Second action: Try to quest with the same character - this should FAIL
-    quest_result = engine.execute_action(GameAction.QUEST_CHARACTER, {'character': attacker})
+    quest_result = engine.execute_action("quest_character", {'character': attacker})
     
     # This should fail because the character is already exerted from challenging
     assert not quest_result.success, "Character should not be able to quest after challenging in the same turn"
@@ -185,7 +185,7 @@ def test_exerted_character_cannot_quest():
     engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # Try to quest with exerted character - should fail
-    quest_result = engine.execute_action(GameAction.QUEST_CHARACTER, {'character': character})
+    quest_result = engine.execute_action("quest_character", {'character': character})
     assert not quest_result.success, "Exerted character should not be able to quest"
     assert "not legal" in quest_result.error_message.lower(), \
         f"Error message should mention action not being legal: {quest_result.error_message}"
@@ -229,7 +229,7 @@ def test_exerted_character_cannot_challenge():
     engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
     
     # Try to challenge with exerted character - should fail
-    challenge_result = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
+    challenge_result = engine.execute_action("challenge_character", {
         'attacker': attacker, 
         'defender': defender
     })
@@ -284,22 +284,22 @@ def test_multiple_actions_in_sequence():
     
     # Check initial legal actions - should include both quest and challenge for Helga
     legal_actions = engine.validator.get_all_legal_actions()
-    quest_actions = [a for a, p in legal_actions if a == GameAction.QUEST_CHARACTER and p.get('character') == helga]
-    challenge_actions = [a for a, p in legal_actions if a == GameAction.CHALLENGE_CHARACTER and p.get('attacker') == helga]
+    quest_actions = [a for a, p in legal_actions if a == "quest_character" and p.get('character') == helga]
+    challenge_actions = [a for a, p in legal_actions if a == "challenge_character" and p.get('attacker') == helga]
     
     print(f"Initial quest actions for Helga: {len(quest_actions)}")
     print(f"Initial challenge actions for Helga: {len(challenge_actions)}")
     
     # Action 1: Quest with Helga (simulating game loop)
-    quest_result = engine.execute_action(GameAction.QUEST_CHARACTER, {'character': helga})
+    quest_result = engine.execute_action("quest_character", {'character': helga})
     assert quest_result.success, f"Quest should succeed: {quest_result.error_message}"
     assert helga.exerted, "Character should be exerted after questing"
     print(f"After quest: Helga exerted = {helga.exerted}")
     
     # Check legal actions again - should NOT include challenge for Helga since she's exerted
     legal_actions = engine.validator.get_all_legal_actions()
-    quest_actions = [a for a, p in legal_actions if a == GameAction.QUEST_CHARACTER and p.get('character') == helga]
-    challenge_actions = [a for a, p in legal_actions if a == GameAction.CHALLENGE_CHARACTER and p.get('attacker') == helga]
+    quest_actions = [a for a, p in legal_actions if a == "quest_character" and p.get('character') == helga]
+    challenge_actions = [a for a, p in legal_actions if a == "challenge_character" and p.get('attacker') == helga]
     
     print(f"After quest - quest actions for Helga: {len(quest_actions)}")
     print(f"After quest - challenge actions for Helga: {len(challenge_actions)}")
@@ -308,8 +308,8 @@ def test_multiple_actions_in_sequence():
     if len(challenge_actions) > 0:
         print("🚨 BUG DETECTED: Challenge actions still available for exerted character!")
         # Try to execute the challenge to see if it actually works
-        challenge_params = next(p for a, p in legal_actions if a == GameAction.CHALLENGE_CHARACTER and p.get('attacker') == helga)
-        challenge_result = engine.execute_action(GameAction.CHALLENGE_CHARACTER, challenge_params)
+        challenge_params = next(p for a, p in legal_actions if a == "challenge_character" and p.get('attacker') == helga)
+        challenge_result = engine.execute_action("challenge_character", challenge_params)
         print(f"Challenge result: {challenge_result.success}, message: {challenge_result.error_message}")
         
         assert False, "BUG: Challenge actions are available for exerted character"
@@ -371,7 +371,7 @@ def test_rush_character_cannot_act_twice():
     assert rush_char.can_challenge(game_state.turn_number), "Rush character should be able to challenge"
     
     # Action 1: Quest with Rush character
-    quest_result = engine.execute_action(GameAction.QUEST_CHARACTER, {'character': rush_char})
+    quest_result = engine.execute_action("quest_character", {'character': rush_char})
     assert quest_result.success, f"Quest should succeed: {quest_result.error_message}"
     assert rush_char.exerted, "Character should be exerted after questing"
     print(f"After quest: Rush character exerted = {rush_char.exerted}")
@@ -383,7 +383,7 @@ def test_rush_character_cannot_act_twice():
     if can_challenge_after_quest:
         print("🚨 BUG DETECTED: Rush character can challenge while exerted!")
         # Try to execute the challenge
-        challenge_result = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
+        challenge_result = engine.execute_action("challenge_character", {
             'attacker': rush_char, 
             'defender': defender
         })
@@ -442,29 +442,29 @@ def test_fix_prevents_double_action_bug():
     
     # Step 1: Get initial legal actions
     legal_actions_1 = engine.validator.get_all_legal_actions()
-    helga_quest_actions_1 = [a for a, p in legal_actions_1 if a == GameAction.QUEST_CHARACTER and p.get('character') == helga]
-    helga_challenge_actions_1 = [a for a, p in legal_actions_1 if a == GameAction.CHALLENGE_CHARACTER and p.get('attacker') == helga]
+    helga_quest_actions_1 = [a for a, p in legal_actions_1 if a == "quest_character" and p.get('character') == helga]
+    helga_challenge_actions_1 = [a for a, p in legal_actions_1 if a == "challenge_character" and p.get('attacker') == helga]
     
     assert len(helga_quest_actions_1) == 1, "Helga should be able to quest initially"
     assert len(helga_challenge_actions_1) == 1, "Helga should be able to challenge initially"
     
     # Step 2: Execute quest
-    quest_result = engine.execute_action(GameAction.QUEST_CHARACTER, {'character': helga})
+    quest_result = engine.execute_action("quest_character", {'character': helga})
     assert quest_result.success, "Quest should succeed"
     assert helga.exerted, "Helga should be exerted after questing"
     assert game_state.has_character_acted_this_turn(helga.id), "Helga should be marked as having acted"
     
     # Step 3: Get legal actions again - THIS IS WHERE THE BUG WAS
     legal_actions_2 = engine.validator.get_all_legal_actions()
-    helga_quest_actions_2 = [a for a, p in legal_actions_2 if a == GameAction.QUEST_CHARACTER and p.get('character') == helga]
-    helga_challenge_actions_2 = [a for a, p in legal_actions_2 if a == GameAction.CHALLENGE_CHARACTER and p.get('attacker') == helga]
+    helga_quest_actions_2 = [a for a, p in legal_actions_2 if a == "quest_character" and p.get('character') == helga]
+    helga_challenge_actions_2 = [a for a, p in legal_actions_2 if a == "challenge_character" and p.get('attacker') == helga]
     
     # With the fix, both should be 0
     assert len(helga_quest_actions_2) == 0, "Helga should NOT be able to quest after already acting"
     assert len(helga_challenge_actions_2) == 0, "Helga should NOT be able to challenge after already acting"
     
     # Step 4: Try to execute challenge anyway (should fail with specific error)
-    challenge_result = engine.execute_action(GameAction.CHALLENGE_CHARACTER, {
+    challenge_result = engine.execute_action("challenge_character", {
         'attacker': helga, 
         'defender': anna
     })

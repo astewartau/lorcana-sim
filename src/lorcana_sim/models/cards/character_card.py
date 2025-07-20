@@ -33,6 +33,13 @@ class CharacterCard(Card):
     location: Optional[str] = None
     turn_played: Optional[int] = None  # Track when character was played for ink drying
     
+    def __setattr__(self, name, value):
+        if name == 'damage' and hasattr(self, 'damage'):
+            old_damage = self.damage
+            super().__setattr__(name, value)
+        else:
+            super().__setattr__(name, value)
+    
     # Composable Ability Integration
     composable_abilities: List['ComposableAbility'] = field(default_factory=list)
     conditional_effects: List['ConditionalEffect'] = field(default_factory=list)
@@ -74,12 +81,13 @@ class CharacterCard(Card):
     
     @property
     def current_willpower(self) -> int:
-        """Get current willpower including ability modifiers."""
+        """Get current willpower including ability modifiers and damage."""
         base = self.willpower
         # Add bonuses  
         for amount, duration in self.willpower_bonuses:
             base += amount
-        return max(1, base)  # Willpower must be at least 1
+        # Subtract damage
+        return base - self.damage
     
     @property
     def current_lore(self) -> int:
@@ -205,6 +213,10 @@ class CharacterCard(Card):
         if self.damage > 0:
             status += f" [{self.damage} damage]"
         return f"{self.full_name} ({self.strength}/{self.willpower}){status}"
+    
+    def __repr__(self) -> str:
+        """Use the same representation as __str__ for cleaner output in collections."""
+        return self.__str__()
     
     # Stat Bonus Management Methods
     def add_lore_bonus(self, amount: int, duration: str) -> None:

@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Any, Dict
-from ..models.game.game_state import GameAction
+# NOTE: GameAction import REMOVED in Phase 4
 from ..models.cards.base_card import Card
 from ..models.cards.character_card import CharacterCard
 
@@ -13,11 +13,7 @@ class GameMove:
     pass
 
 
-@dataclass
-class ActionMove(GameMove):
-    """Move representing a game action."""
-    action: GameAction
-    parameters: Dict[str, Any]
+# NOTE: ActionMove class REMOVED in Phase 4
 
 
 @dataclass

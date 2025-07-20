@@ -14,16 +14,16 @@ import os
 import random
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from src.lorcana_sim.models.game.game_state import GameState, GameAction, Phase, GameResult
+from src.lorcana_sim.models.game.game_state import GameState, Phase, GameResult
 from src.lorcana_sim.engine.event_system import GameEvent
 from src.lorcana_sim.engine.game_engine import GameEngine
-from src.lorcana_sim.engine.step_system import ExecutionMode
+from src.lorcana_sim.engine.game_engine import ExecutionMode
 from src.lorcana_sim.engine.game_messages import (
     MessageType, ActionRequiredMessage, ChoiceRequiredMessage, 
     StepExecutedMessage, GameOverMessage
 )
 from src.lorcana_sim.engine.game_moves import (
-    GameMove, ActionMove, InkMove, PlayMove, QuestMove, ChallengeMove, 
+    GameMove, InkMove, PlayMove, QuestMove, ChallengeMove, 
     SingMove, ChoiceMove, PassMove
 )
 from src.lorcana_sim.loaders.deck_loader import DeckLoader
@@ -41,7 +41,7 @@ def setup_game():
     loader = DeckLoader(cards_db_path)
     
     # Load both decks
-    ashley, tace = loader.load_two_decks(deck1_path, deck2_path, "Ashley (Amethyst-Steel)", "Tace")
+    ashley, tace = loader.load_two_decks(deck1_path, deck2_path, "Ashley", "Tace")
     
     # Create game state
     game_state = GameState([ashley, tace])
@@ -158,9 +158,7 @@ def print_board_state(game_state):
     
     # Show Ashley's ink pile (if any)
     if ashley.inkwell:
-        print(f"   🔮 Ink pile ({len(ashley.inkwell)}): {', '.join([card.name for card in ashley.inkwell[:5]])}")
-        if len(ashley.inkwell) > 5:
-            print(f"      ... and {len(ashley.inkwell) - 5} more")
+        print(f"   🔮 Ink pile ({len(ashley.inkwell)} cards)")
     
     print()
     
@@ -188,9 +186,7 @@ def print_board_state(game_state):
     
     # Show Tace's ink pile (if any)
     if tace.inkwell:
-        print(f"   🔮 Ink pile ({len(tace.inkwell)}): {', '.join([card.name for card in tace.inkwell[:5]])}")
-        if len(tace.inkwell) > 5:
-            print(f"      ... and {len(tace.inkwell) - 5} more")
+        print(f"   🔮 Ink pile ({len(tace.inkwell)} cards)")
     
 
 
@@ -205,59 +201,110 @@ def choose_strategic_move(message: ActionRequiredMessage) -> GameMove:
     current_player = message.player
     phase = message.phase
     
+    
+    
     # Auto-progress non-play phases
     if phase != Phase.PLAY:
-        progress_actions = [a for a in legal_actions if a.action == GameAction.PROGRESS]
+        progress_actions = [a for a in legal_actions if a.action == "progress"]
         if progress_actions:
             return PassMove()
     
-    # Play ink if low (keep existing logic)
-    if current_player.total_ink < 6:
-        ink_actions = [a for a in legal_actions if a.action == GameAction.PLAY_INK]
+    # Play ink early game only - hard limit at 7 to prevent excessive inking
+    if current_player.total_ink < 5:  # Much more aggressive - stop at 5 ink
+        ink_actions = [a for a in legal_actions if a.action == "play_ink"]
         if ink_actions:
             card = random.choice(ink_actions).target
             return InkMove(card=card)
     
-    # Early game: prioritize board development
-    if len(current_player.characters_in_play) == 0:
-        char_actions = [a for a in legal_actions if a.action == GameAction.PLAY_CHARACTER]
-        affordable_chars = [a for a in char_actions if current_player.can_afford(a.target)]
-        if affordable_chars:
-            card = random.choice(affordable_chars).target
-            return PlayMove(card=card)
+    # Prioritize playing characters if we can afford them
+    char_actions = [a for a in legal_actions if a.action == "play_character"]
+    affordable_chars = [a for a in char_actions if current_player.can_afford(a.target)]
+    if affordable_chars and random.random() < 0.8:  # 80% chance to play character
+        card = random.choice(affordable_chars).target
+        return PlayMove(card=card)
     
     # Look for quest actions
-    quest_actions = [a for a in legal_actions if a.action == GameAction.QUEST_CHARACTER]
-    challenge_actions = [a for a in legal_actions if a.action == GameAction.CHALLENGE_CHARACTER]
+    quest_actions = [a for a in legal_actions if a.action == "quest_character"]
+    challenge_actions = [a for a in legal_actions if a.action == "challenge_character"]
     
-    # Strategic decision making (simplified version of existing logic)
-    if quest_actions and random.random() < 0.7:  # 70% chance to quest
-        character = random.choice(quest_actions).target
-        return QuestMove(character=character)
-    
-    if challenge_actions and random.random() < 0.3:  # 30% chance to challenge
+    # Strategic decision making - be very aggressive
+    if challenge_actions and random.random() < 0.95:  # 95% chance to challenge
         action = random.choice(challenge_actions)
         return ChallengeMove(
             attacker=action.parameters.get('attacker'),
             defender=action.parameters.get('defender')
         )
     
+    if quest_actions and random.random() < 0.9:  # 90% chance to quest
+        character = random.choice(quest_actions).target
+        return QuestMove(character=character)
+    
     # Try to play characters
-    char_actions = [a for a in legal_actions if a.action == GameAction.PLAY_CHARACTER]
+    char_actions = [a for a in legal_actions if a.action == "play_character"]
     affordable_chars = [a for a in char_actions if current_player.can_afford(a.target)]
     if affordable_chars:
         card = random.choice(affordable_chars).target
         return PlayMove(card=card)
     
+    # Only ink if we have very low ink and can't afford anything (respect 7 ink limit)
+    ink_actions = [a for a in legal_actions if a.action == "play_ink"]
+    if ink_actions and phase == Phase.PLAY and current_player.total_ink < 3 and current_player.total_ink < 7:
+        # Emergency ink if we have very little (but never exceed 7 total ink)
+        affordable_cards = [card for card in current_player.hand if card.cost <= current_player.available_ink]
+        if not affordable_cards:
+            card = random.choice(ink_actions).target
+            return InkMove(card=card)
+    
+    # Last check: just take ANY action instead of passing if we have actions available
+    if legal_actions and phase == Phase.PLAY:
+        # Don't pass if we have other actions available (but respect ink limit)
+        non_pass_actions = [a for a in legal_actions if a.action not in ["progress", "pass_turn"]]
+        # Filter out ink actions if we already have 7 or more ink
+        if current_player.total_ink >= 7:
+            non_pass_actions = [a for a in non_pass_actions if a.action != "play_ink"]
+        
+        if non_pass_actions:
+            action = random.choice(non_pass_actions)
+            # Convert to move
+            if action.action == "play_ink":
+                return InkMove(action.target)
+            elif action.action == "play_character":
+                return PlayMove(action.target)
+            elif action.action == "quest_character":
+                return QuestMove(action.target)
+            elif action.action == "challenge_character":
+                return ChallengeMove(action.parameters['attacker'], action.parameters['defender'])
+    
     # Default to pass/progress
-    pass_actions = [a for a in legal_actions if a.action in [GameAction.PROGRESS, GameAction.PASS_TURN]]
+    pass_actions = [a for a in legal_actions if a.action in ["progress", "pass_turn"]]
     if pass_actions:
         return PassMove()
     
-    # Last resort - random action
+    # Last resort - random action (respect ink limit)
     if legal_actions:
-        action = random.choice(legal_actions)
-        return ActionMove(action.action, action.parameters)
+        # Filter out ink actions if we already have 7 or more ink
+        filtered_actions = legal_actions
+        if current_player.total_ink >= 7:
+            filtered_actions = [a for a in legal_actions if a.action != "play_ink"]
+        
+        # Use filtered actions if available, otherwise fallback to all actions
+        actions_to_choose_from = filtered_actions if filtered_actions else legal_actions
+        action = random.choice(actions_to_choose_from)
+        
+        # Convert LegalAction to appropriate move type
+        if action.action == "play_ink":
+            return InkMove(action.parameters['card'])
+        elif action.action == "play_character":
+            return PlayMove(action.parameters['card'])
+        elif action.action == "quest_character":
+            return QuestMove(action.parameters['character'])
+        elif action.action == "challenge_character":
+            return ChallengeMove(action.parameters['attacker'], action.parameters['defender'])
+        elif action.action in ["progress", "pass_turn"]:
+            return PassMove()
+        else:
+            # Fallback for other action types
+            return PassMove()
     
     return None
 
@@ -307,8 +354,46 @@ def handle_choice_message(message: ChoiceRequiredMessage) -> ChoiceMove:
     return ChoiceMove(choice_id=choice.choice_id, option=selected_option)
 
 
-def display_step_message(message: StepExecutedMessage):
+def format_card_display(card, include_owner=False):
+    """Format a card for display with full name, abilities, and stats."""
+    if not card:
+        return "Unknown Card"
+    
+    # Get basic card name
+    name = getattr(card, 'name', str(card))
+    
+    # Get abilities (excluding passive ones that don't need display)
+    abilities = []
+    if hasattr(card, 'abilities') and card.abilities:
+        for ability in card.abilities:
+            if hasattr(ability, 'ability_name') and ability.ability_name:
+                abilities.append(ability.ability_name.title())
+    
+    # Build the display string
+    display_parts = [name]
+    
+    # Add abilities in parentheses
+    if abilities:
+        display_parts.append(f"({', '.join(abilities)})")
+    
+    # Add stats for characters
+    if hasattr(card, 'strength') and hasattr(card, 'willpower'):
+        lore = getattr(card, 'lore', 0)
+        strength = getattr(card, 'strength', 0)
+        willpower = getattr(card, 'willpower', 0)
+        display_parts.append(f"💪{strength}/❤️{willpower}/⭐{lore}")
+    
+    # Add owner if requested
+    if include_owner and hasattr(card, 'controller') and card.controller:
+        owner_name = getattr(card.controller, 'name', 'Unknown Player')
+        return f"{owner_name}'s {' '.join(display_parts)}"
+    
+    return ' '.join(display_parts)
+
+
+def display_step_message(message: StepExecutedMessage, game_state=None):
     """Display a step execution message in a user-friendly format."""
+    
     # Extract action type from step for better formatting
     step = message.step
     
@@ -404,56 +489,61 @@ def display_step_message(message: StepExecutedMessage):
         elif event == GameEvent.INK_PLAYED:
             player = context.get('player')
             card = context.get('card')
+            phase = context.get('phase')
+            
+            # Extract phase info if available
+            phase_info = f" (during {phase.value} phase)" if phase and hasattr(phase, 'value') else ""
             
             if player and card:
                 player_name = player.name if hasattr(player, 'name') else str(player)
-                card_name = card.name if hasattr(card, 'name') else str(card)
-                print(f"🔮 {player_name} inked {card_name}")
+                card_display = format_card_display(card)
+                print(f"🔮 {player_name} inked {card_display}{phase_info}")
             else:
                 player_name = context.get('player_name', 'Unknown Player')
                 card_name = context.get('card_name', 'Unknown Card')
-                print(f"🔮 {player_name} inked {card_name}")
+                print(f"🔮 {player_name} inked {card_name}{phase_info}")
             return
             
-        elif event in [GameEvent.PHASE_BEGINS, GameEvent.PHASE_ENDS]:
-            player = context.get('player')
-            phase = context.get('phase')
-            previous_phase = context.get('previous_phase')
-            new_phase = context.get('new_phase')
+        elif event == GameEvent.INK_READIED:
+            player_name = context.get('player_name', 'Unknown Player')
+            ink_count = context.get('ink_count', 0)
+            if ink_count > 0:
+                print(f"💎 {player_name} readied {ink_count} ink")
+            return
             
+        elif event in [GameEvent.READY_PHASE, GameEvent.SET_PHASE, GameEvent.DRAW_PHASE, GameEvent.PLAY_PHASE]:
+            player = context.get('player')
             player_name = player.name if (player and hasattr(player, 'name')) else 'Unknown Player'
             
-            if event == GameEvent.PHASE_BEGINS and phase:
-                phase_name = phase.value if hasattr(phase, 'value') else str(phase)
-                print(f"⚙️ Phase change ({player_name}; {phase_name} phase)")
-            elif event == GameEvent.PHASE_BEGINS and new_phase:
-                phase_name = new_phase.value if hasattr(new_phase, 'value') else str(new_phase)
-                print(f"⚙️ Phase change ({player_name}; {phase_name} phase)")
-            elif event == GameEvent.PHASE_ENDS and phase:
-                phase_name = phase.value if hasattr(phase, 'value') else str(phase)
-                print(f"⚙️ Phase change ({player_name}; ending {phase_name} phase)")
-            elif event == GameEvent.PHASE_ENDS and previous_phase:
-                phase_name = previous_phase.value if hasattr(previous_phase, 'value') else str(previous_phase)
-                print(f"⚙️ Phase change ({player_name}; ending {phase_name} phase)")
-            else:
-                print(f"⚙️ Phase change ({player_name})")
+            if event == GameEvent.READY_PHASE:
+                print(f"⚙️ Ready phase ({player_name})")
+            elif event == GameEvent.SET_PHASE:
+                print(f"⚙️ Set phase ({player_name})")
+            elif event == GameEvent.DRAW_PHASE:
+                print(f"⚙️ Draw phase ({player_name})")
+            elif event == GameEvent.PLAY_PHASE:
+                print(f"⚙️ Play phase ({player_name})")
             return
             
         elif event == GameEvent.CHARACTER_PLAYED:
             character = context.get('character')
             player = context.get('player')
+            phase = context.get('phase')
+            
+            # Extract phase info if available
+            phase_info = f" (during {phase.value} phase)" if phase and hasattr(phase, 'value') else ""
             
             if character and player:
-                character_name = character.name if hasattr(character, 'name') else "Unknown"
+                character_display = format_card_display(character)
                 player_name = player.name if hasattr(player, 'name') else str(player)
-                print(f"🎭 {player_name} played {character_name}")
+                print(f"🎭 {player_name} played {character_display}{phase_info}")
             elif character:
-                character_name = character.name if hasattr(character, 'name') else "Unknown"
-                print(f"🎭 Played {character_name}")
+                character_display = format_card_display(character)
+                print(f"🎭 Played {character_display}{phase_info}")
             else:
                 character_name = context.get('character_name', 'Unknown')
                 player_name = context.get('player_name', 'Unknown Player')
-                print(f"🎭 {player_name} played {character_name}")
+                print(f"🎭 {player_name} played {character_name}{phase_info}")
             return
             
         elif event == GameEvent.CHARACTER_QUESTS:
@@ -462,15 +552,16 @@ def display_step_message(message: StepExecutedMessage):
             lore_gained = context.get('lore_gained', 0)
             
             if character and player:
-                character_name = character.name if hasattr(character, 'name') else "Unknown"
+                character_display = format_card_display(character)
                 player_name = player.name if hasattr(player, 'name') else str(player)
-                print(f"🏆 {player_name}'s {character_name} quested for {lore_gained} lore")
+                current_lore = getattr(player, 'lore', 0)
+                print(f"🏆 {player_name} quested with {character_display} for {lore_gained} lore (now {current_lore} total)")
             elif character:
-                character_name = character.name if hasattr(character, 'name') else "Unknown"
-                print(f"🏆 {character_name} quested for {lore_gained} lore")
+                character_display = format_card_display(character)
+                print(f"🏆 Quested with {character_display} for {lore_gained} lore")
             else:
                 character_name = context.get('character_name', 'Unknown')
-                print(f"🏆 {character_name} quested for {lore_gained} lore")
+                print(f"🏆 Quested with {character_name} for {lore_gained} lore")
             return
             
         elif event == GameEvent.CHARACTER_CHALLENGES:
@@ -478,35 +569,44 @@ def display_step_message(message: StepExecutedMessage):
             defender = context.get('defender')
             damage_to_attacker = context.get('damage_to_attacker', 0)
             damage_to_defender = context.get('damage_to_defender', 0)
-            banished_characters = context.get('banished_characters', [])
             
             if attacker and defender:
-                attacker_name = attacker.name if hasattr(attacker, 'name') else "Unknown"
-                defender_name = defender.name if hasattr(defender, 'name') else "Unknown"
+                attacker_display = format_card_display(attacker, include_owner=True)
+                defender_display = format_card_display(defender, include_owner=True)
                 
                 damage_parts = []
                 if damage_to_defender > 0:
+                    defender_name = getattr(defender, 'name', 'Unknown') if defender else 'Unknown'
                     damage_parts.append(f"{defender_name} took {damage_to_defender} damage")
                 if damage_to_attacker > 0:
+                    attacker_name = getattr(attacker, 'name', 'Unknown') if attacker else 'Unknown'
                     damage_parts.append(f"{attacker_name} took {damage_to_attacker} damage")
-                
-                banished_parts = []
-                for char in banished_characters:
-                    char_name = char.name if hasattr(char, 'name') else "Unknown"
-                    banished_parts.append(f"{char_name} banished")
                 
                 details = []
                 if damage_parts:
                     details.extend(damage_parts)
-                if banished_parts:
-                    details.extend(banished_parts)
                 
                 detail_text = f" ({', '.join(details)})" if details else ""
-                print(f"⚔️ {attacker_name} challenged {defender_name}{detail_text}")
+                print(f"⚔️ {attacker_display} challenged {defender_display}{detail_text}")
             else:
                 attacker_name = context.get('attacker_name', 'Unknown')
                 defender_name = context.get('defender_name', 'Unknown')
                 print(f"⚔️ {attacker_name} challenged {defender_name}")
+            return
+            
+        elif event == GameEvent.CHARACTER_BANISHED:
+            character = context.get('character')
+            reason = context.get('reason', 'unknown')
+            
+            if character:
+                character_display = format_card_display(character, include_owner=True)
+                if reason == 'willpower_depleted':
+                    print(f"💀 {character_display} was banished!")
+                else:
+                    print(f"💀 {character_display} was banished ({reason})!")
+            else:
+                character_name = context.get('character_name', 'Unknown')
+                print(f"💀 {character_name} was banished!")
             return
             
         elif event == GameEvent.GAME_ENDS:
@@ -542,8 +642,25 @@ def display_step_message(message: StepExecutedMessage):
             
         elif effect_type == 'draw_cards':
             count = effect_data.get('count', 1)
-            card_text = "card" if count == 1 else "cards"
-            print(f"📚 Drew {count} {card_text}")
+            drawn_cards = effect_data.get('drawn_cards', [])
+            player = effect_data.get('target')  # The target is usually the player who drew
+            player_name = player.name if player and hasattr(player, 'name') else "Player"
+            
+            if drawn_cards:
+                # Show the actual card names that were drawn with full details
+                valid_cards = [card for card in drawn_cards if card is not None]
+                if len(valid_cards) == 1:
+                    card_display = format_card_display(valid_cards[0])
+                    print(f"📚 {player_name} drew {card_display}")
+                elif len(valid_cards) > 1:
+                    card_displays = [format_card_display(card) for card in valid_cards]
+                    print(f"📚 {player_name} drew {len(valid_cards)} cards: {', '.join(card_displays)}")
+                else:
+                    print(f"📚 {player_name} drew {count} card{'s' if count != 1 else ''} (failed)")
+            else:
+                # Fallback to generic message
+                card_text = "card" if count == 1 else "cards"
+                print(f"📚 {player_name} drew {count} {card_text}")
             return
             
         elif effect_type == 'banish_character':
@@ -562,8 +679,25 @@ def display_step_message(message: StepExecutedMessage):
             return
             
         elif effect_type == 'ready_character':
-            character_name = effect_data.get('character_name', 'Unknown Character')
-            print(f"✨ Readied {character_name}")
+            character = effect_data.get('character')
+            player = effect_data.get('player')
+            player_name = player.name if player and hasattr(player, 'name') else "Player"
+            
+            if character:
+                character_display = format_card_display(character)
+                print(f"✨ {player_name} readied {character_display}")
+            else:
+                # Fallback to character name if no full character object
+                character_name = effect_data.get('character_name', 'Unknown Character')
+                print(f"✨ {player_name} readied {character_name}")
+            return
+            
+        elif effect_type == 'ready_ink':
+            ink_count = effect_data.get('ink_count', 0)
+            player = effect_data.get('player')
+            player_name = player.name if (player and hasattr(player, 'name')) else 'Unknown Player'
+            if ink_count > 0:
+                print(f"💎 {player_name} readied {ink_count} ink")
             return
             
         elif effect_type == 'remove_damage':
@@ -580,6 +714,19 @@ def display_step_message(message: StepExecutedMessage):
             
             if source_desc and "(sub-effect)" in source_desc:
                 print(f"📋 {effect_str}")
+            elif "quest" in effect_str.lower() and "quest" in source_desc.lower():
+                # Handle quest messages specially 
+                target = effect_data.get('target')
+                if target and hasattr(target, 'controller') and target.controller:
+                    player_name = target.controller.name
+                    player_lore = getattr(target.controller, 'lore', 0)
+                    character_lore = getattr(target, 'lore', 1)  # Default quest lore
+                    character_display = format_card_display(target)
+                    print(f"🏆 {player_name} quested with {character_display} for {character_lore} lore (now {player_lore} total)")
+                else:
+                    # Fallback to character name from source_desc
+                    character_name = source_desc.replace(" quests", "").strip()
+                    print(f"🏆 Quested with {character_name}")
             else:
                 formatted_desc = f"📋 {effect_str} on {target_name}"
                 if source_desc:
@@ -619,6 +766,58 @@ def display_step_message(message: StepExecutedMessage):
         print(description)
         return
     
+    # Handle additional effect types from _extract_effect_data
+    if hasattr(message, 'event_data') and message.event_data and isinstance(message.event_data, dict):
+        effect_type = message.event_data.get('type')
+        
+        if effect_type == 'phase_transition':
+            # Handle phase transition effects - don't show as "played a card"
+            previous_phase = message.event_data.get('previous_phase')
+            new_phase = message.event_data.get('new_phase')
+            player = message.event_data.get('player')
+            player_name = player.name if player and hasattr(player, 'name') else "Unknown Player"
+            
+            if new_phase and hasattr(new_phase, 'value'):
+                print(f"⚙️ {player_name} enters {new_phase.value} phase")
+                # Print board state at the start of each ready phase
+                if new_phase.value == 'ready' and game_state:
+                    print_board_state(game_state)
+            elif previous_phase and hasattr(previous_phase, 'value'):
+                print(f"⚙️ {player_name} exits {previous_phase.value} phase")
+            else:
+                print(f"⚙️ {player_name} phase transition")
+            return
+        
+        elif effect_type == 'ink_card':
+            # Handle ink card effects
+            card = message.event_data.get('card')
+            player = message.event_data.get('player')
+            player_name = player.name if player and hasattr(player, 'name') else "Unknown Player"
+            
+            if card:
+                card_display = format_card_display(card)
+                print(f"🔮 {player_name} inked {card_display}")
+            else:
+                # Fallback to card name if no full card object
+                card_name = message.event_data.get('card_name', 'Unknown Card')
+                print(f"🔮 {player_name} inked {card_name}")
+            return
+            
+        elif effect_type == 'play_character':
+            # Handle character play effects
+            character = message.event_data.get('character')
+            player = message.event_data.get('player')
+            player_name = player.name if player and hasattr(player, 'name') else "Unknown Player"
+            
+            if character:
+                character_display = format_card_display(character)
+                print(f"🎭 {player_name} played {character_display}")
+            else:
+                # Fallback to character name if no full character object
+                character_name = message.event_data.get('character_name', 'Unknown Character')
+                print(f"🎭 {player_name} played {character_name}")
+            return
+    
     # Handle step-based display when no structured event_data is available
     if step and hasattr(step, 'value'):
         step_str = step.value.lower()
@@ -642,14 +841,34 @@ def display_step_message(message: StepExecutedMessage):
         if hasattr(message, 'event_data') and message.event_data:
             context = message.event_data.get('context', {})
             card = context.get('card')
+            phase = context.get('phase')
+            
+            # Extract phase info if available
+            phase_info = f" (during {phase.value} phase)" if phase and hasattr(phase, 'value') else ""
+            
             if card and hasattr(card, 'name'):
-                print(f"🔮 {player_name} inked {card.name}")
+                card_display = format_card_display(card)
+                print(f"🔮 {player_name} inked {card_display}{phase_info}")
             else:
-                print(f"🔮 {player_name} played ink")
+                print(f"🔮 {player_name} inked a card{phase_info}")
         else:
             print(f"🔮 {player_name} played ink")
     elif "play" in step_str:
-        print(f"🎭 {player_name} played a card")
+        # Try to find play action context
+        if hasattr(message, 'event_data') and message.event_data:
+            context = message.event_data.get('context', {})
+            card = context.get('card')
+            phase = context.get('phase')
+            
+            # Extract phase info if available
+            phase_info = f" (during {phase.value} phase)" if phase and hasattr(phase, 'value') else ""
+            
+            if card and hasattr(card, 'name'):
+                print(f"🎭 {player_name} played {card.name}{phase_info}")
+            else:
+                print(f"🎭 {player_name} played a card{phase_info}")
+        else:
+            print(f"🎭 {player_name} played a card")
     elif "quest" in step_str:
         print(f"🏆 {player_name}'s character quested")
     elif "challenge" in step_str:
@@ -662,17 +881,19 @@ def display_step_message(message: StepExecutedMessage):
             damage_to_defender = context.get('damage_to_defender', 0)
             
             if attacker and defender:
-                attacker_name = attacker.name if hasattr(attacker, 'name') else "Unknown"
-                defender_name = defender.name if hasattr(defender, 'name') else "Unknown"
+                attacker_display = format_card_display(attacker, include_owner=True)
+                defender_display = format_card_display(defender, include_owner=True)
                 
                 damage_parts = []
                 if damage_to_defender > 0:
+                    defender_name = getattr(defender, 'name', 'Unknown') if defender else 'Unknown'
                     damage_parts.append(f"{defender_name} took {damage_to_defender} damage")
                 if damage_to_attacker > 0:
+                    attacker_name = getattr(attacker, 'name', 'Unknown') if attacker else 'Unknown'
                     damage_parts.append(f"{attacker_name} took {damage_to_attacker} damage")
                 
                 damage_text = f" ({', '.join(damage_parts)})" if damage_parts else ""
-                print(f"⚔️ {attacker_name} challenged {defender_name}{damage_text}")
+                print(f"⚔️ {attacker_display} challenged {defender_display}{damage_text}")
             else:
                 print(f"⚔️ {player_name}'s character challenged")
         else:
@@ -684,25 +905,31 @@ def display_step_message(message: StepExecutedMessage):
     elif "lore_gained" in step_str:
         print(f"⭐ Lore gained")
     elif "phase" in step_str:
-        # Try to find phase context
-        if hasattr(message, 'event_data') and message.event_data:
-            context = message.event_data.get('context', {})
-            previous_phase = context.get('previous_phase')
-            new_phase = context.get('new_phase')
-            
-            if new_phase and hasattr(new_phase, 'value'):
-                print(f"⚙️ Phase change ({player_name}; {new_phase.value} phase)")
-            elif previous_phase and hasattr(previous_phase, 'value'):
-                print(f"⚙️ Phase change ({player_name}; ending {previous_phase.value} phase)")
+        # Handle specific phase events
+        if step_str in ["ready_phase", "set_phase", "draw_phase", "play_phase"]:
+            phase_name = step_str.replace("_", " ").title()
+            print(f"⚙️ {phase_name} ({player_name})")
+        else:
+            # Try to find phase context
+            if hasattr(message, 'event_data') and message.event_data:
+                context = message.event_data.get('context', {})
+                previous_phase = context.get('previous_phase')
+                new_phase = context.get('new_phase')
+                
+                if new_phase and hasattr(new_phase, 'value'):
+                    print(f"⚙️ Phase change ({player_name}; {new_phase.value} phase)")
+                elif previous_phase and hasattr(previous_phase, 'value'):
+                    print(f"⚙️ Phase change ({player_name}; ending {previous_phase.value} phase)")
+                else:
+                    print(f"⚙️ Phase change ({player_name})")
             else:
                 print(f"⚙️ Phase change ({player_name})")
-        else:
-            print(f"⚙️ Phase change ({player_name})")
     elif "turn_ended" in step_str:
         print(f"🔄 {player_name} ended turn")
     else:
         # Generic step display
-        print(f"📋 Game step: {step}")
+        #print(f"📋 Game step: {step}")
+        pass
 
 
 def simulate_random_game():
@@ -717,16 +944,20 @@ def simulate_random_game():
     engine.start_game()
     
     message_count = 0
-    max_messages = 2000  # Safety limit
+    max_messages = 5000  # Safety limit
     last_turn_number = 0
     
-    print_board_state(game_state)
+    # Initialize move container outside loop
+    move = None
     
-    # Get first message
-    message = engine.next_message()
+    # DO NOT get initial message - let the loop handle it
     
     while message_count < max_messages:
         message_count += 1
+        
+        # Single call point for next_message - always at loop start
+        message = engine.next_message(move)
+        move = None  # Reset immediately after use
         
         # Handle different message types
         if isinstance(message, GameOverMessage):
@@ -736,43 +967,28 @@ def simulate_random_game():
         elif isinstance(message, ActionRequiredMessage):
             # Show turn transition if needed
             if game_state.turn_number != last_turn_number:
-                print(f"⚪ {message.player.name} begins turn {game_state.turn_number} - {message.phase.value} phase")
                 last_turn_number = game_state.turn_number
-            
-            # Show board state only at start of ready phase
-            if message.phase.value == 'ready':
-                # Show board state at start of each ready phase (except turn 1)
-                if game_state.turn_number > 1:
-                    print_board_state(game_state)
-            
+                
             # Choose a move strategically
             move = choose_strategic_move(message)
             if move is None:
                 print(f"❌ No legal moves for {message.player.name}, ending game")
                 break
-            
-            # Process the move by getting the next message with the move
-            message = engine.next_message(move)
-            # Continue processing this message in the same iteration
-            continue
+            # Move will be passed to next_message in the next iteration
             
         elif isinstance(message, StepExecutedMessage):
             # Display the step that was executed
-            display_step_message(message)
-                
+            display_step_message(message, game_state)
+            # No action needed - next message will be fetched at loop start
+            
         elif isinstance(message, ChoiceRequiredMessage):
             # Handle player choice
-            choice_move = handle_choice_message(message)
-            message = engine.next_message(choice_move)
-            # Continue processing this message in the same iteration
-            continue
-
+            move = handle_choice_message(message)
+            # Move will be passed to next_message in the next iteration
+            
         else:
             # Handle any other message types (e.g., info messages)
             print(f"ℹ️  {message}")
-        
-        # Get next message for next iteration
-        message = engine.next_message()
     
     # Final results
     print("=" * 50)
@@ -806,5 +1022,5 @@ def simulate_random_game():
 
 if __name__ == "__main__":
     # Set random seed for reproducible results (remove for true randomness)
-    random.seed(49)
+    #random.seed()
     simulate_random_game()

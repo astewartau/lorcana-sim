@@ -1,7 +1,7 @@
 """Move validation system for Lorcana gameplay."""
 
 from typing import List, Tuple, Optional, Dict, Any
-from ..models.game.game_state import GameState, GameAction, Phase
+from ..models.game.game_state import GameState, Phase
 from ..models.cards.character_card import CharacterCard
 from ..models.cards.action_card import ActionCard
 from ..models.cards.item_card import ItemCard
@@ -13,8 +13,11 @@ class MoveValidator:
     
     def __init__(self, game_state: GameState):
         self.game_state = game_state
+        self.temporarily_blocked_actions = set()
+        self.last_clear_turn = -1
+        self.last_clear_phase = ""
     
-    def get_all_legal_actions(self) -> List[Tuple[GameAction, Dict[str, Any]]]:
+    def get_all_legal_actions(self) -> List[Tuple[str, Dict[str, Any]]]:
         """Get all legal actions for current player in current phase."""
         legal_actions = []
         
@@ -27,49 +30,48 @@ class MoveValidator:
         
         # Use value comparison to avoid enum identity issues
         if phase.value == 'ready':
-            legal_actions.append((GameAction.PROGRESS, {}))
-            legal_actions.append((GameAction.PASS_TURN, {}))
+            # READY phase auto-progresses - no player actions available
+            pass
         
         elif phase.value == 'set':
-            # Set step - resolve start-of-turn effects
-            legal_actions.append((GameAction.PROGRESS, {}))
-            legal_actions.append((GameAction.PASS_TURN, {}))
+            # SET phase auto-progresses - no player actions available
+            pass
         
         elif phase.value == 'draw':
-            # Draw step - draw a card
-            legal_actions.append((GameAction.PROGRESS, {}))
-            legal_actions.append((GameAction.PASS_TURN, {}))
+            # DRAW phase auto-progresses - no player actions available
+            pass
         
         elif phase.value == 'play':
             # Play ink (once per turn)
-            if self.game_state.can_play_ink():
+            can_play_ink = self.game_state.can_play_ink()
+            if can_play_ink:
                 ink_cards = self.get_playable_ink_cards()
                 for card in ink_cards:
-                    legal_actions.append((GameAction.PLAY_INK, {'card': card}))
+                    legal_actions.append(("play_ink", {'card': card}))
             # Play characters
             characters = self.get_playable_characters()
             for character in characters:
-                legal_actions.append((GameAction.PLAY_CHARACTER, {'card': character}))
+                legal_actions.append(("play_character", {'card': character}))
             
             # Play actions
             actions = self.get_playable_actions()
             for action in actions:
-                legal_actions.append((GameAction.PLAY_ACTION, {'card': action}))
+                legal_actions.append(("play_action", {'card': action}))
             
             # Play items
             items = self.get_playable_items()
             for item in items:
-                legal_actions.append((GameAction.PLAY_ITEM, {'card': item}))
+                legal_actions.append(("play_item", {'card': item}))
             
             # Quest with characters
             questing = self.get_characters_that_can_quest()
             for character in questing:
-                legal_actions.append((GameAction.QUEST_CHARACTER, {'character': character}))
+                legal_actions.append(("quest_character", {'character': character}))
             
             # Challenge with characters
             challenges = self.get_possible_challenges()
             for attacker, defender in challenges:
-                legal_actions.append((GameAction.CHALLENGE_CHARACTER, {
+                legal_actions.append(("challenge_character", {
                     'attacker': attacker, 
                     'defender': defender
                 }))
@@ -77,16 +79,26 @@ class MoveValidator:
             # Sing songs
             songs = self.get_singable_songs()
             for song, singer in songs:
-                legal_actions.append((GameAction.SING_SONG, {
+                legal_actions.append(("sing_song", {
                     'song': song,
                     'singer': singer
                 }))
             
             # Add progress and pass turn options
-            legal_actions.append((GameAction.PROGRESS, {}))
-            legal_actions.append((GameAction.PASS_TURN, {}))
+            legal_actions.append(("progress", {}))
+            legal_actions.append(("pass_turn", {}))
         
-        return legal_actions
+        # Clear blocked actions if turn or phase has changed
+        self._clear_blocked_actions_if_needed()
+        
+        # Filter out temporarily blocked actions
+        filtered_actions = []
+        for action, params in legal_actions:
+            action_signature = self._create_action_signature(action, params)
+            if action_signature not in self.temporarily_blocked_actions:
+                filtered_actions.append((action, params))
+        
+        return filtered_actions
     
     def get_playable_ink_cards(self) -> List[Card]:
         """Get cards that can be played as ink."""
@@ -287,7 +299,7 @@ class MoveValidator:
         # Fallback: assume songs require a cost equal to their regular cost
         return song.cost
     
-    def validate_action(self, action: GameAction, parameters: Dict[str, Any]) -> Tuple[bool, str]:
+    def validate_action(self, action: str, parameters: Dict[str, Any]) -> Tuple[bool, str]:
         """Validate if a specific action with parameters is legal."""
         legal_actions = self.get_all_legal_actions()
         
@@ -305,3 +317,62 @@ class MoveValidator:
             if key not in legal or legal[key] != value:
                 return False
         return True
+    
+    def block_action_temporarily(self, action: str, parameters: Dict[str, Any]) -> None:
+        """Temporarily block an action that has failed."""
+        action_signature = self._create_action_signature(action, parameters)
+        self.temporarily_blocked_actions.add(action_signature)
+        print(f"🚫 Temporarily blocked action: {action_signature}")
+    
+    def clear_blocked_actions(self) -> None:
+        """Clear all temporarily blocked actions."""
+        if self.temporarily_blocked_actions:
+            print(f"🔓 Cleared {len(self.temporarily_blocked_actions)} blocked actions")
+            self.temporarily_blocked_actions.clear()
+    
+    def _clear_blocked_actions_if_needed(self) -> None:
+        """Clear blocked actions on phase transitions or turn changes."""
+        current_turn = self.game_state.turn_number
+        current_phase = self.game_state.current_phase.value
+        
+        if (current_turn != self.last_clear_turn or 
+            current_phase != self.last_clear_phase):
+            self.clear_blocked_actions()
+            self.last_clear_turn = current_turn
+            self.last_clear_phase = current_phase
+    
+    def _create_action_signature(self, action: str, parameters: Dict[str, Any]) -> str:
+        """Create a unique signature for an action to track blocked actions."""
+        # Create a signature that includes the action type and key identifying parameters
+        signature_parts = [action]
+        
+        # Add key parameters that uniquely identify the action
+        if 'card' in parameters:
+            card = parameters['card']
+            if hasattr(card, 'id'):
+                signature_parts.append(f"card_id:{card.id}")
+            elif hasattr(card, 'name'):
+                signature_parts.append(f"card_name:{card.name}")
+        
+        if 'character' in parameters:
+            character = parameters['character']
+            if hasattr(character, 'id'):
+                signature_parts.append(f"character_id:{character.id}")
+            elif hasattr(character, 'name'):
+                signature_parts.append(f"character_name:{character.name}")
+        
+        if 'attacker' in parameters:
+            attacker = parameters['attacker']
+            if hasattr(attacker, 'id'):
+                signature_parts.append(f"attacker_id:{attacker.id}")
+            elif hasattr(attacker, 'name'):
+                signature_parts.append(f"attacker_name:{attacker.name}")
+        
+        if 'defender' in parameters:
+            defender = parameters['defender']
+            if hasattr(defender, 'id'):
+                signature_parts.append(f"defender_id:{defender.id}")
+            elif hasattr(defender, 'name'):
+                signature_parts.append(f"defender_name:{defender.name}")
+        
+        return "|".join(signature_parts)

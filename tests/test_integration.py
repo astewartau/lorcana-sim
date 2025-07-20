@@ -188,7 +188,7 @@ def test_create_simple_game(sample_cards):
     assert len(legal_actions) > 0
     
     # Should be able to pass turn  
-    pass_actions = [action for action in legal_actions if action[0].value == "pass_turn"]
+    pass_actions = [action for action in legal_actions if action[0] == "pass_turn"]
     assert len(pass_actions) > 0
 
 

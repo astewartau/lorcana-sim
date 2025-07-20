@@ -197,7 +197,7 @@ class ActionQueue:
                 success=True,
                 result=result,
                 events_emitted=emitted_events,
-                queued_action=action if not apply_effect else None  # Store action if not applied
+                queued_action=action  # Always store action for message creation
             )
             
             self._execution_history.append(action_result)

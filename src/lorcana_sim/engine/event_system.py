@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from ..models.game.game_state import GameState
     from ..models.cards.character_card import CharacterCard
     from ..models.cards.action_card import ActionCard
-    from .step_system import StepProgressionEngine, GameStep
+    # NOTE: StepProgressionEngine removed in Phase 4
 
 
 class GameEvent(Enum):
@@ -31,8 +31,10 @@ class GameEvent(Enum):
     # Turn structure events
     TURN_BEGINS = "turn_begins"
     TURN_ENDS = "turn_ends"
-    PHASE_BEGINS = "phase_begins"
-    PHASE_ENDS = "phase_ends"
+    READY_PHASE = "ready_phase"
+    SET_PHASE = "set_phase"
+    DRAW_PHASE = "draw_phase"
+    PLAY_PHASE = "play_phase"
     READY_STEP = "ready_step"
     SET_STEP = "set_step"
     DRAW_STEP = "draw_step"
@@ -42,6 +44,7 @@ class GameEvent(Enum):
     CARD_DRAWN = "card_drawn"
     CARD_DISCARDED = "card_discarded"
     INK_PLAYED = "ink_played"
+    INK_READIED = "ink_readied"
     LORE_GAINED = "lore_gained"
     
     # Item events
@@ -87,6 +90,7 @@ class GameEvent(Enum):
     SINGING_COST_MODIFIED = "singing_cost_modified"
     DAMAGE_REMOVED = "damage_removed"
     DECK_LOOKED_AT = "deck_looked_at"
+    CONDITIONAL_EFFECT_APPLIED = "conditional_effect_applied"
 
 
 @dataclass
@@ -117,7 +121,7 @@ class GameEventManager:
     def __init__(self, game_state: 'GameState'):
         self.game_state = game_state
         self._composable_listeners: Dict[GameEvent, List[Any]] = {}  # For composable abilities
-        self.step_engine: Optional['StepProgressionEngine'] = None
+        # NOTE: step_engine removed in Phase 4
         self.event_interceptors: List[Callable[[EventContext], bool]] = []
         self._paused_events: List[EventContext] = []
     
@@ -134,10 +138,7 @@ class GameEventManager:
                 
             # If no relevant events found, the ability doesn't need event registration
             if not relevant_events:
-                print(f"DEBUG: No relevant events for ability {ability.name}, listeners: {len(ability.listeners)}")
                 return
-            
-            print(f"DEBUG: Registering ability {ability.name} for events: {relevant_events}")
         else:
             # For non-composable abilities, they must implement get_relevant_events() method
             if hasattr(ability, 'get_relevant_events'):
@@ -157,9 +158,9 @@ class GameEventManager:
             if ability in event_list:
                 event_list.remove(ability)
 
-    def set_step_engine(self, step_engine: 'StepProgressionEngine') -> None:
-        """Set the step progression engine for step-by-step execution."""
-        self.step_engine = step_engine
+    def set_step_engine(self, step_engine) -> None:
+        """DEPRECATED: Step engine removed in Phase 4."""
+        pass
     
     def add_event_interceptor(self, interceptor: Callable[[EventContext], bool]) -> None:
         """Add an event interceptor that can pause/modify event processing."""
@@ -195,32 +196,28 @@ class GameEventManager:
         
         for ability in composable_abilities:
             try:
-                # If we have a step engine, we might need to create steps for abilities
-                if self.step_engine and hasattr(ability, 'requires_steps') and ability.requires_steps():
-                    steps = ability.create_execution_steps(event_context)
-                    if steps:
-                        self.step_engine.queue_steps(steps)
-                        results.append(f"Queued steps for ability: {ability.name}")
-                else:
-                    # Execute immediately for simple abilities - only log if something actually triggered
-                    triggered = False
+                # NOTE: Step-based abilities removed in Phase 4
+                # All abilities now use effect-based execution through ActionQueue
+                
+                # Execute immediately for simple abilities - only log if something actually triggered
+                triggered = False
+                for listener in ability.listeners:
+                    if listener.should_trigger(event_context):
+                        triggered = True
+                        break
+                
+                if triggered:
+                    ability.handle_event(event_context)
+                    # Get effect details for more informative output
+                    effect_details = []
                     for listener in ability.listeners:
                         if listener.should_trigger(event_context):
-                            triggered = True
-                            break
+                            effect_details.append(str(listener.effect))
                     
-                    if triggered:
-                        ability.handle_event(event_context)
-                        # Get effect details for more informative output
-                        effect_details = []
-                        for listener in ability.listeners:
-                            if listener.should_trigger(event_context):
-                                effect_details.append(str(listener.effect))
-                        
-                        if effect_details:
-                            results.append(f"Triggered {ability.name}: {', '.join(effect_details)}")
-                        else:
-                            results.append(f"Triggered composable ability: {ability.name}")
+                    if effect_details:
+                        results.append(f"Triggered {ability.name}: {', '.join(effect_details)}")
+                    else:
+                        results.append(f"Triggered composable ability: {ability.name}")
             except Exception as e:
                 results.append(f"Error executing composable ability {ability}: {str(e)}")
         

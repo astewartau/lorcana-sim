@@ -27,6 +27,7 @@ class PhaseManagementComponent:
         """End current player's turn and start next player's turn."""
         # Reset turn state
         game_state.ink_played_this_turn = False
+        game_state.card_drawn_this_turn = False
         game_state.actions_this_turn.clear()
         game_state.characters_acted_this_turn.clear()
         
@@ -51,6 +52,7 @@ class PhaseManagementComponent:
             List of event data for items that were readied.
         """
         from ....engine.event_system import GameEvent
+        from ....models.abilities.composable import ReadyInk
         
         current_player = game_state.current_player
         readied_items = []
@@ -86,6 +88,7 @@ class PhaseManagementComponent:
                 'event': GameEvent.CHARACTER_READIED,
                 'context': {
                     'character_name': char.name,
+                    'character': char,  # Include full character object for detailed display
                     'reason': 'ready_step'
                 }
             })
@@ -104,13 +107,52 @@ class PhaseManagementComponent:
                 }
             })
         
+        # Count exerted ink cards
+        exerted_ink_count = sum(1 for card in current_player.inkwell if card.exerted)
+        
+        # If there are exerted ink cards, queue a ReadyInk effect
+        if exerted_ink_count > 0:
+            # Create and apply the ReadyInk effect
+            ready_ink_effect = ReadyInk()  # No parameter = ready all
+            context = {
+                'game_state': game_state,
+                'player': current_player,
+                'ability_name': 'Ready Phase'
+            }
+            
+            # Apply the effect
+            ready_ink_effect.apply(current_player, context)
+            
+            # Get the events from the effect
+            ink_events = ready_ink_effect.get_events(current_player, context, None)
+            
+            # Add ink ready events to the list
+            for event in ink_events:
+                event_data = {
+                    'event': event['type'],
+                    'context': event['additional_data']
+                }
+                readied_items.append(event_data)
+        
         return readied_items
     
-    def set_step(self, game_state: "GameState") -> None:
-        """Execute the set step (resolve start-of-turn effects)."""
+    def set_step(self, game_state: "GameState") -> List[Dict[str, Any]]:
+        """Execute the set step (resolve start-of-turn effects).
+        
+        Returns:
+            List of event data for set step events that occurred.
+        """
         # Handle any start-of-turn triggered abilities
         # TODO: Implement start-of-turn ability resolution here
-        pass
+        set_events = []
+        
+        # Currently no set phase effects, but structure for future expansion
+        # Example future effects:
+        # - Start-of-turn triggered abilities
+        # - Ongoing effect resolutions
+        # - Status effect processing
+        
+        return set_events
     
     def draw_step(self, game_state: "GameState") -> List[Dict[str, Any]]:
         """Execute the draw step (draw a card).

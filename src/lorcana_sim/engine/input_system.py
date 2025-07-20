@@ -1,11 +1,30 @@
-"""Player input system for step-by-step game progression."""
+"""Player input system - simplified after step system removal."""
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union, Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from .step_system import StepType, PlayerInput, GameStep
+# NOTE: Step system dependencies removed in Phase 4
+# Basic stub definitions for compatibility
+
+class StepType(Enum):
+    CHOICE = "choice"
+    SELECTION = "selection"
+    CONFIRMATION = "confirmation"
+
+@dataclass
+class PlayerInput:
+    input_type: StepType
+    prompt: str
+    options: List[Any] = None
+    constraints: Dict[str, Any] = None
+
+@dataclass 
+class GameStep:
+    step_id: str
+    description: str
+
 from ..models.cards.base_card import Card
 from ..models.cards.character_card import CharacterCard
 
