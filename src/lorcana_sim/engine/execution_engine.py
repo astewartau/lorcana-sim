@@ -87,7 +87,11 @@ class ExecutionEngine:
             return self.action_queue.enqueue(
                 effect=effect,
                 target=self.game_state.current_player,
-                context={'game_state': self.game_state},
+                context={
+                    'game_state': self.game_state,
+                    'choice_manager': self.choice_manager,
+                    'action_queue': self.action_queue
+                },
                 priority=ActionPriority.NORMAL,
                 source_description=f"Player plays {move.card.name}"
             )
@@ -129,9 +133,21 @@ class ExecutionEngine:
             )
             
         elif isinstance(move, ChoiceMove):
-            # Choices resolve immediately, not queued
-            self.choice_manager.resolve_choice(move.choice_id, move.option)
-            return ""  # No action ID for immediate resolution
+            # Queue choice resolution as an effect
+            from ..models.abilities.composable.effects import ResolveChoiceEffect
+            action_id = self.action_queue.enqueue(
+                effect=ResolveChoiceEffect(move.choice_id, move.option),
+                target=self.choice_manager,
+                context={'game_state': self.game_state, 'action_queue': self.action_queue},
+                priority=ActionPriority.IMMEDIATE,  # Choices should resolve immediately
+                source_description=f"Resolve choice: {move.option}"
+            )
+            
+            # Resume the action queue if it's paused (waiting for choice)
+            if self.action_queue.is_paused():
+                self.action_queue.resume()
+            
+            return action_id
             
         # NOTE: ActionMove support REMOVED in Phase 4
         

@@ -11,7 +11,9 @@ from enum import Enum
 from abc import ABC, abstractmethod
 
 from ..models.abilities.composable.effects import Effect, NoEffect
+from ..utils.logging_config import get_game_logger
 
+logger = get_game_logger(__name__)
 
 class ChoiceType(Enum):
     """Types of choices players can make."""
@@ -445,6 +447,7 @@ class GameChoiceManager:
             if option.id == selected_option:
                 selected_effect = option.effect
                 selected_target = option.target  # Use option's target if specified
+                logger.debug("Found selected option {selected_option}: target={selected_target}, effect={selected_effect}")
                 break
         
         if selected_effect is None:
@@ -455,7 +458,16 @@ class GameChoiceManager:
         target = selected_target if selected_target is not None else self.current_choice.trigger_context.get('_choice_target')
         context = self.current_choice.trigger_context.get('_choice_execution_context', {})
         
+        logger.debug("Choice execution - selected_target: {selected_target}")
+        logger.debug("Choice execution - fallback _choice_target: {self.current_choice.trigger_context.get('_choice_target')}")
+        logger.debug("Choice execution - final target: {target}")
+        
         if target is not None:
+            # Update the trigger context to replace _choice_target with the selected target
+            if '_choice_target' in self.current_choice.trigger_context:
+                logger.debug("Updating _choice_target from {self.current_choice.trigger_context['_choice_target']} to {selected_target}")
+                self.current_choice.trigger_context['_choice_target'] = selected_target
+            
             # Check if we have an ActionQueue available in the context
             action_queue = context.get('action_queue')
             if action_queue and hasattr(action_queue, 'enqueue'):
@@ -469,15 +481,10 @@ class GameChoiceManager:
                     f"Choice: {self.current_choice.ability_name}"
                 )
             else:
-                # Fallback to direct execution
-                result = selected_effect.apply(target, context)
-                
-                # Collect events from the effect and add to choice_events
-                game_state = context.get('game_state')
-                if game_state and hasattr(game_state, 'choice_events'):
-                    if hasattr(selected_effect, 'get_events'):
-                        events = selected_effect.get_events(target, context, result)
-                        game_state.choice_events.extend(events)
+                # No action queue available - this should not happen in normal operation
+                # Log error but don't execute directly to maintain architectural integrity
+                print(f"WARNING: No ActionQueue available for choice resolution. Effect not executed.")
+                print(f"Context keys: {list(context.keys()) if context else 'None'}")
         
         # Store the result
         self.choice_results[choice_id] = {

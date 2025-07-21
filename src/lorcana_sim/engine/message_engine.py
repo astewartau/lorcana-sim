@@ -107,6 +107,20 @@ class MessageEngine:
             # - Queue more effects (but doesn't execute them)
             # - Return a result that we turn into a message
             result = self.execution_engine.action_queue.process_next_action()
+            
+            # Check for pending choices AFTER executing the action
+            # This is important for choice-generating effects
+            if self.choice_manager.has_pending_choices():
+                choice = self.choice_manager.get_current_choice()
+                self.waiting_for_input = True
+                msg = ChoiceRequiredMessage(
+                    type=MessageType.CHOICE_REQUIRED,
+                    player=choice.player,
+                    choice=choice,
+                    ability_source=getattr(choice, 'source', None)
+                )
+                return msg
+            
             return self._create_message_from_result(result)
         
         # 6. Check for pending choices

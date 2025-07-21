@@ -665,7 +665,16 @@ def display_step_message(message: StepExecutedMessage, game_state=None):
             
         elif effect_type == 'gain_lore':
             amount = effect_data.get('amount', 0)
-            print(f"⭐ Gained {amount} lore")
+            target_name = getattr(effect_data.get('target'), 'name', 'Unknown') if effect_data.get('target') else 'Unknown'
+            total_lore = getattr(effect_data.get('target'), 'lore', 0) if effect_data.get('target') else 0
+            
+            # Check if this came from an ability (source description contains ability info)
+            if hasattr(message, 'step') and '🔮' in message.step:
+                # Extract ability info from source description like "🔮 Minnie Mouse's DANCE-OFF"
+                source_info = message.step.replace('🔮 ', '')
+                print(f"⭐ {target_name} gained {amount} lore from {source_info} (total {total_lore} lore)")
+            else:
+                print(f"⭐ {target_name} gained {amount} lore (total {total_lore} lore)")
             return
             
         elif effect_type == 'draw_cards':

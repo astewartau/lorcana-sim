@@ -11,7 +11,9 @@ from .event_system import GameEventManager, GameEvent, EventContext
 from .damage_calculator import DamageCalculator, DamageType
 from .action_result import ActionResult, ActionResultType
 from .choice_system import GameChoiceManager
+from ..utils.logging_config import get_game_logger
 
+logger = get_game_logger(__name__)
 
 class ActionExecutor:
     """Executes game actions and returns results."""
@@ -121,6 +123,13 @@ class ActionExecutor:
         
         # Register any conditional effects the card has
         self.game_state.register_card_conditional_effects(card)
+        
+        # Register any composable abilities the card has
+        if hasattr(card, 'composable_abilities') and card.composable_abilities:
+            for ability in card.composable_abilities:
+                if hasattr(ability, 'register_with_event_manager'):
+                    ability.register_with_event_manager(self.event_manager)
+                    logger.debug("Registered ability {getattr(ability, 'name', 'unknown')} for events")
         
         # Trigger CHARACTER_ENTERS_PLAY event
         enter_play_context = EventContext(

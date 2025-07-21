@@ -130,7 +130,9 @@ def setup_game_with_characters(player1_characters: List[CharacterCard],
 def advance_to_main_phase(game_state: GameState) -> None:
     """Advance game state to MAIN phase for testing actions."""
     game_state.current_phase = Phase.MAIN
-    # Reset ink usage to give players full ink access
-    game_state.players[0].ink_used_this_turn = 0
+    # Ready all ink cards to give players full ink access
+    for card in game_state.players[0].inkwell:
+        card.exerted = False
     if len(game_state.players) > 1:
-        game_state.players[1].ink_used_this_turn = 0
+        for card in game_state.players[1].inkwell:
+            card.exerted = False

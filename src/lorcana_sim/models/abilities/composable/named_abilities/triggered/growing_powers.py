@@ -2,25 +2,24 @@
 
 from typing import Any
 from ..registry import register_named_ability
-from ...composable_ability import quick_ability
-from ...effects import EXERT_CHARACTER
-from ...target_selectors import CONTROLLER
+from ...composable_ability import ComposableAbility
+from ...effects import Effect, EXERT
+from ...target_selectors import CharacterSelector, ready_filter
 from ...triggers import when_enters_play
-from ......engine.choice_system import choose_character_effect
 
 
-class GrowingPowersEffect:
+class GrowingPowersEffect(Effect):
     """Effect that makes each opponent choose and exert one of their ready characters."""
     
     def apply(self, target: Any, context: dict) -> Any:
         game_state = context.get('game_state')
         ability_owner = context.get('ability_owner')
-        choice_manager = context.get('choice_manager')
+        action_queue = context.get('action_queue')
         
-        if not game_state or not ability_owner or not choice_manager:
+        if not game_state or not ability_owner or not action_queue:
             return target
         
-        # For each opponent player
+        # For each opponent player, queue a choice effect
         for player in game_state.players:
             if player != ability_owner.controller:
                 # Get ready characters for this opponent
@@ -28,26 +27,32 @@ class GrowingPowersEffect:
                              if hasattr(c, 'exerted') and not c.exerted]
                 
                 if ready_chars:
-                    # Create a choice for this specific opponent
-                    # Note: We need to capture the player variable properly in the lambda
-                    current_player = player  # Capture the current player value
-                    choice_effect = choose_character_effect(
-                        prompt="Choose one of your ready characters to exert",
-                        character_filter=lambda char, current_player=current_player: not char.exerted and char.controller == current_player,
-                        effect_on_selected=EXERT_CHARACTER,
-                        ability_name="GROWING POWERS",
-                        allow_none=False,  # Must choose a character
-                        from_play=True,
-                        from_hand=False,
-                        controller_characters=True,  # Show the choosing player's characters
-                        opponent_characters=False
+                    # Create a selector for this opponent's ready characters
+                    def opponent_ready_filter(char, ctx, current_player=player):
+                        return (char.controller == current_player and 
+                               ready_filter(char, ctx))
+                    
+                    opponent_selector = CharacterSelector(opponent_ready_filter)
+                    
+                    # Create a ChoiceGenerationEffect for this opponent
+                    from ...effects import ChoiceGenerationEffect
+                    
+                    choice_effect = ChoiceGenerationEffect(
+                        target_selector=opponent_selector,
+                        follow_up_effect=EXERT,
+                        ability_name="GROWING POWERS"
                     )
                     
-                    # Apply the choice effect to this specific player
+                    # Queue the choice effect with the opponent as the target
                     choice_context = context.copy()
                     choice_context['player'] = player
                     choice_context['ability_owner'] = ability_owner
-                    choice_effect.apply(player, choice_context)
+                    
+                    action_queue.enqueue(
+                        choice_effect,
+                        player,  # The opponent who will make the choice
+                        choice_context
+                    )
         
         return target
     
@@ -59,12 +64,12 @@ class GrowingPowersEffect:
 def create_growing_powers(character: Any, ability_data: dict):
     """GROWING POWERS - When you play this character, each opponent chooses and exerts one of their ready characters.
     
-    Implementation: Uses new choice system to let each opponent choose which character to exert.
+    Implementation: Uses new choice-based architectural pattern with multiple opponent choices.
     """
-    return quick_ability(
-        "GROWING POWERS",
-        character,
-        when_enters_play(character),
-        CONTROLLER,
-        GrowingPowersEffect()
-    )
+    return (ComposableAbility("GROWING POWERS", character)
+            .add_trigger(
+                trigger_condition=when_enters_play(character),
+                target_selector=CharacterSelector(lambda c, ctx: False),  # No direct target
+                effect=GrowingPowersEffect(),
+                name="GROWING POWERS"
+            ))

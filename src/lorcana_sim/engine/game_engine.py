@@ -55,6 +55,10 @@ class GameEngine:
         self.damage_calculator = DamageCalculator(game_state)
         self.choice_manager = GameChoiceManager()
         
+        # Link managers to game state for ability access
+        game_state.event_manager = self.event_manager
+        game_state.choice_manager = self.choice_manager
+        
         # Message stream components - legacy for compatibility during transition
         self.waiting_for_input = False
         self.current_choice = None
@@ -67,7 +71,7 @@ class GameEngine:
         self.message_engine = MessageEngine(
             game_state, self.choice_manager, self.validator, self.execution_engine
         )
-        self.choice_engine = ChoiceEngine(game_state, self.choice_manager)
+        self.choice_engine = ChoiceEngine(game_state, self.choice_manager, self.execution_engine)
         
         # Give event_manager access to action_queue for universal action_queue fix
         self.event_manager.execution_engine = self.execution_engine

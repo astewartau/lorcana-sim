@@ -45,55 +45,43 @@ class ComposableListener:
         if hasattr(event_context, 'additional_data') and event_context.additional_data:
             context.update(event_context.additional_data)
         
-        # Select targets
-        targets = self.target_selector.select(context)
-
         # Queue ability trigger effect instead of direct effect (TWO-STAGE EXECUTION)
         action_queue = context.get('action_queue')
         
-        if action_queue and targets:
+        if action_queue:
             try:
                 from ....engine.action_queue import ActionPriority
-                from .effects import AbilityTriggerEffect
+                from .effects import AbilityTriggerEffect, TargetedEffect, ChoiceGenerationEffect
                 
             except Exception as e:
                 return
             
-            # Create ability trigger wrapper
-            trigger_effect = AbilityTriggerEffect(
-                ability_name=self.name,
-                source_card=context.get('ability_owner', event_context.source),
-                actual_effect=self.effect
-            )
-            
-            for target in targets:
-                try:
-                    action_queue.enqueue(
-                        effect=trigger_effect,  # Queue the wrapper, not the direct effect
-                        target=target,
-                        context=context,
-                        priority=ActionPriority.HIGH,  # Triggered effects go to front
-                        source_description=f"✨ Triggered {getattr(context.get('ability_owner'), 'name', 'Unknown')}'s {self.name}: {str(self.effect)}"
-                    )
-                except Exception as e:
-                    # Log error but don't crash the game
-                    pass
-        elif action_queue:
-            # For effects that don't need targets (like PreventEffect) - queue them too
-            from ...engine.action_queue import ActionPriority
-            from .effects import AbilityTriggerEffect
-            
-            # Create ability trigger wrapper
-            trigger_effect = AbilityTriggerEffect(
-                ability_name=self.name,
-                source_card=context.get('ability_owner', event_context.source),
-                actual_effect=self.effect
-            )
+            # Check if this is already a ChoiceGenerationEffect (new pattern)
+            if isinstance(self.effect, ChoiceGenerationEffect):
+                # For choice effects, queue the ChoiceGenerationEffect directly
+                # It will handle creating the choice and queueing the follow-up effect
+                trigger_effect = AbilityTriggerEffect(
+                    ability_name=self.name,
+                    source_card=context.get('ability_owner', event_context.source),
+                    actual_effect=self.effect  # This is already a ChoiceGenerationEffect
+                )
+            else:
+                # For non-choice effects, use the old pattern with TargetedEffect
+                targeted_effect = TargetedEffect(
+                    base_effect=self.effect,
+                    ability_name=self.name
+                )
+                
+                trigger_effect = AbilityTriggerEffect(
+                    ability_name=self.name,
+                    source_card=context.get('ability_owner', event_context.source),
+                    actual_effect=targeted_effect
+                )
             
             try:
                 action_queue.enqueue(
-                    effect=trigger_effect,  # Queue the wrapper, not the direct effect
-                    target=None,
+                    effect=trigger_effect,  # Queue the wrapper with the appropriate effect
+                    target=event_context.source,  # Use the ability owner as the initial target
                     context=context,
                     priority=ActionPriority.HIGH,  # Triggered effects go to front
                     source_description=f"✨ Triggered {getattr(context.get('ability_owner'), 'name', 'Unknown')}'s {self.name}: {str(self.effect)}"
@@ -104,11 +92,32 @@ class ComposableListener:
         else:
             # Fallback: apply immediately if no action_queue available (backwards compatibility)
             try:
-                if targets:
-                    for target in targets:
-                        self.effect.apply(target, context)
-                else:
-                    self.effect.apply(None, context)
+                from .effects import TargetedEffect, ChoiceGenerationEffect
+                
+                if isinstance(self.effect, ChoiceGenerationEffect):
+                    # Cannot handle choice effects without action queue
+                    print(f"Warning: Cannot execute choice effect {self.name} without action queue")
+                    return
+                
+                # Create targeted effect for immediate execution
+                targeted_effect = TargetedEffect(
+                    base_effect=self.effect,
+                    ability_name=self.name
+                )
+                
+                # For immediate execution, we need to provide resolved targets
+                # Use the target selector to get targets directly
+                targets = self.target_selector.select(context)
+                context['resolved_targets'] = targets  # Always set, even if empty
+                
+                # For effects that don't need targets (like PreventEffect), just apply directly
+                from .target_selectors import NoTargetSelector
+                if isinstance(self.target_selector, NoTargetSelector):
+                    # Apply effect directly without targets
+                    self.effect.apply(event_context.source, context)
+                elif targets:
+                    # Apply through TargetedEffect wrapper
+                    targeted_effect.apply(event_context.source, context)
             except Exception as e:
                 # Log error but don't crash the game
                 print(f"Error applying effect {self.effect} (fallback): {e}")
@@ -264,6 +273,44 @@ class ComposableAbility:
                 # Singer X can sing songs that require cost X or less
                 return required_cost <= listener.effect.singer_cost
         return False
+    
+    def choice_effect(self, 
+                     trigger_condition: Callable[[EventContext], bool],
+                     target_selector: TargetSelector,
+                     effect: Effect,
+                     priority: int = 0,
+                     name: str = "") -> 'ComposableAbility':
+        """Add a choice-based trigger that uses the new architectural pattern (fluent interface)."""
+        from .effects import ChoiceGenerationEffect, TargetedEffect
+        
+        # Create the targeted effect that will be queued after choice resolution
+        targeted_effect = TargetedEffect(
+            base_effect=effect,
+            ability_name=name or f"ChoiceEffect{len(self.listeners) + 1}"
+        )
+        
+        # Create the choice generation effect that handles the choice creation
+        choice_effect = ChoiceGenerationEffect(
+            target_selector=target_selector,
+            follow_up_effect=targeted_effect,
+            ability_name=name or f"ChoiceEffect{len(self.listeners) + 1}"
+        )
+        
+        # Add as a normal trigger, but with the choice generation effect
+        listener = ComposableListener(
+            trigger_condition=trigger_condition,
+            target_selector=target_selector,  # This will be used to generate choices
+            effect=choice_effect,
+            priority=priority,
+            name=name or f"ChoiceEffect{len(self.listeners) + 1}"
+        )
+        self.listeners.append(listener)
+        
+        # If already registered with event manager, register this new listener
+        if self._event_manager:
+            self._register_listener(listener)
+        
+        return self
     
     def __str__(self) -> str:
         return f"{self.name} (Composable: {len(self.listeners)} triggers)"

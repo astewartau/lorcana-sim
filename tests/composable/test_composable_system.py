@@ -1,11 +1,10 @@
 """Comprehensive tests for the composable ability system."""
 
 import pytest
-from unittest.mock import Mock, MagicMock
-
 from lorcana_sim.models.abilities.composable import *
 from lorcana_sim.models.abilities.composable.keyword_abilities import *
 from lorcana_sim.engine.event_system import GameEvent, EventContext
+from lorcana_sim.models.game.player import Player
 
 
 class MockCharacter:
@@ -67,6 +66,7 @@ class MockPlayer:
     
     def __init__(self, characters=None):
         self.characters_in_play = characters or []
+        self.name = "Test Player"
         
     def draw_cards(self, count):
         pass
@@ -223,7 +223,9 @@ class TestComposableAbilities:
         """Test creating a Support-like ability."""
         character = MockCharacter("Support Character")
         target_char = MockCharacter("Target Character")
-        target_char.controller = character.controller = Mock()
+        # Create real player for controller
+        player = Player("Test Player")
+        target_char.controller = character.controller = player
         
         support = quick_ability(
             name="Support 2",
@@ -273,7 +275,9 @@ class TestComposableAbilities:
         """Test ability with multiple effects on same trigger."""
         character = MockCharacter("Rally Character")
         target_char = MockCharacter("Target Character")
-        target_char.controller = character.controller = Mock()
+        # Create real player for controller
+        player = Player("Test Player")
+        target_char.controller = character.controller = player
         
         rally = quick_ability(
             name="Rally",
@@ -352,7 +356,9 @@ class TestKeywordAbilities:
         """Test Support ability - gives strength bonus when support character quests."""
         support_char = MockCharacter("Support Character", strength=3)
         target_char = MockCharacter("Target Character")
-        target_char.controller = support_char.controller = Mock()
+        # Create real player for controller
+        player = Player("Test Player")
+        target_char.controller = support_char.controller = player
         
         support = create_support_ability(support_char)
         
@@ -429,7 +435,9 @@ class TestIntegration:
         resist_ability = create_resist_ability(2, resist_char)
         
         support_char = MockCharacter("Support Character", strength=3) 
-        support_char.controller = resist_char.controller = Mock()
+        # Create real player for controller
+        player = Player("Test Player")
+        support_char.controller = resist_char.controller = player
         support_ability = create_support_ability(support_char)
         
         # Test 1: Support character quests (triggers support ability)

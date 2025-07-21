@@ -19,10 +19,11 @@ def create_event_data(event: GameEvent, **context) -> Dict[str, Any]:
 class ChoiceEngine:
     """Dedicated engine for player choice handling and resolution."""
     
-    def __init__(self, game_state, choice_manager: GameChoiceManager):
+    def __init__(self, game_state, choice_manager: GameChoiceManager, execution_engine=None):
         self.game_state = game_state
         self.choice_manager = choice_manager
         self.current_choice = None
+        self.execution_engine = execution_engine
         
     def resolve_choice(self, choice_id: str, option: str) -> None:
         """Resolve a player choice."""
@@ -65,6 +66,9 @@ class ChoiceEngine:
             
         if not success:
             raise ValueError(f"Failed to resolve choice {choice_id} with option {option}")
+        
+        # Note: ActionQueue resumption is now handled automatically by the TargetedEffect
+        # when it sees that a choice has been resolved and targets are available
     
     def trigger_choice_events(self, event: GameEvent, context: Dict):
         """Handle choice-related event triggering."""

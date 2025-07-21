@@ -77,7 +77,6 @@ class TestIceOverIntegration(BaseNamedAbilityTest):
         self.player2.characters_in_play.append(target_char)
         
         # Player needs enough ink to pay cost
-        self.player1.ink_used_this_turn = 0  # Reset ink usage
         # Add ink to inkwell to have available ink
         ink_card = create_test_character(name="Ink - Test", cost=1)
         self.player1.inkwell = [ink_card, ink_card]  # 2 ink available

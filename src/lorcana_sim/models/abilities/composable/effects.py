@@ -4,7 +4,9 @@ from abc import ABC, abstractmethod
 from typing import Any, List, Union, Callable, Dict, Optional
 from dataclasses import dataclass
 from enum import Enum
+from ....utils.logging_config import get_game_logger
 
+logger = get_game_logger(__name__)
 
 class Effect(ABC):
     """Base class for composable effects."""
@@ -57,13 +59,26 @@ class AbilityTriggerEffect(Effect):
         self.actual_effect = actual_effect
     
     def apply(self, target: Any, context: Dict[str, Any]) -> None:
-        """Apply the actual effect directly - don't queue it again."""
-        # Apply the real effect immediately instead of queuing it
-        # This prevents duplicate messages
-        self.actual_effect.apply(target, context)
+        """Queue the actual effect for the next message call."""
+        action_queue = context.get('action_queue')
+        if action_queue:
+            # Import here to avoid circular imports
+            from ....engine.action_queue import ActionPriority
+            # Queue the real effect with ability attribution
+            source_name = getattr(self.source_card, 'name', 'Unknown')
+            action_queue.enqueue(
+                effect=self.actual_effect,
+                target=target,
+                context=context,
+                priority=ActionPriority.HIGH,
+                source_description=f"🔮 {source_name}'s {self.ability_name}"
+            )
+        else:
+            # Fallback: apply immediately if no action_queue available
+            self.actual_effect.apply(target, context)
     
     def __str__(self) -> str:
-        return str(self.actual_effect)
+        return f"ability trigger"
 
 
 class CompositeEffect(Effect):
@@ -601,6 +616,89 @@ class GrantProperty(Effect):
         return f"grant {self.property_name}"
 
 
+class TargetedEffect(Effect):
+    """Effect that operates on pre-selected targets only. Never generates choices."""
+    
+    def __init__(self, base_effect, ability_name="Unknown"):
+        self.base_effect = base_effect
+        self.ability_name = ability_name
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        """Apply effect to pre-resolved targets only."""
+        logger.debug("TargetedEffect.apply called for ability {self.ability_name}")
+        
+        # This effect should ONLY be called when targets are already resolved
+        targets = context.get('resolved_targets')
+        
+        if targets is None:
+            raise ValueError(f"TargetedEffect for {self.ability_name} called without resolved targets")
+        
+        logger.debug("Using resolved targets: {targets}")
+        
+        # Apply base effect to all selected targets
+        result = target
+        logger.debug("Applying base effect {self.base_effect} to {len(targets)} targets")
+        for selected_target in targets:
+            # Skip None targets (when player chose "no target")
+            if selected_target is not None:
+                logger.debug("Applying effect to target: {selected_target}")
+                try:
+                    result = self.base_effect.apply(selected_target, context)
+                    logger.debug("Effect applied successfully")
+                except Exception as e:
+                    logger.debug("Error applying effect: {e}")
+                    raise
+        
+        logger.debug("TargetedEffect completed, returning: {result}")
+        return result
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for targeted effect."""
+        targets = context.get('resolved_targets', [])
+        
+        if not targets:
+            return []
+        
+        # Aggregate events from base effect for all targets
+        all_events = []
+        for selected_target in targets:
+            if hasattr(self.base_effect, 'get_events'):
+                events = self.base_effect.get_events(selected_target, context, result)
+                all_events.extend(events)
+        
+        return all_events
+    
+    def __str__(self) -> str:
+        return f"apply to selected targets: {self.base_effect}"
+
+
+class StoreTargetEffect(Effect):
+    """Effect that stores a selected target for later use."""
+    
+    def __init__(self, selected_target):
+        self.selected_target = selected_target
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        """Store the selected target in the game state for later use."""
+        logger.debug("StoreTargetEffect.apply called with selected_target: {self.selected_target}")
+        game_state = context.get('game_state')
+        if game_state:
+            if not hasattr(game_state, 'selected_targets'):
+                game_state.selected_targets = []
+            game_state.selected_targets.append(self.selected_target)
+            logger.debug("Stored target {self.selected_target} in game_state.selected_targets, now has {len(game_state.selected_targets)} targets")
+        else:
+            logger.debug("No game_state found in context")
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for target storage."""
+        return []
+    
+    def __str__(self) -> str:
+        return f"store target {getattr(self.selected_target, 'name', str(self.selected_target))}"
+
+
 class NoEffect(Effect):
     """No effect (for passive abilities that just modify rules)."""
     
@@ -756,6 +854,18 @@ class PlayCharacterEffect(Effect):
             success = player.play_character(self.card, ink_cost)
             if success:
                 self._player = player  # Store for event generation
+                
+                # Register the character's composable abilities with the event system
+                # This must happen after playing but before events are emitted
+                if hasattr(self.card, 'composable_abilities') and self.card.composable_abilities:
+                    # Get event manager from context
+                    game_state = context.get('game_state')
+                    event_manager = getattr(game_state, 'event_manager', None) if game_state else None
+                    
+                    if event_manager:
+                        for ability in self.card.composable_abilities:
+                            if hasattr(ability, 'register_with_event_manager'):
+                                ability.register_with_event_manager(event_manager)
             return target
         except Exception as e:
             # Log error but don't crash
@@ -763,23 +873,38 @@ class PlayCharacterEffect(Effect):
             return target
     
     def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
-        """Get CHARACTER_PLAYED event for this effect."""
+        """Get CHARACTER_ENTERS_PLAY and CHARACTER_PLAYED events for this effect."""
         if not self._player:
             return []
         
         # Import here to avoid circular imports
         from ....engine.event_system import GameEvent
         
-        return [{
-            'type': GameEvent.CHARACTER_PLAYED,
-            'player': self._player,
-            'source': self.card,
-            'additional_data': {
-                'character_played': self.card,
-                'character_name': self.card.name if hasattr(self.card, 'name') else 'Unknown Character',
-                'cost_paid': getattr(self.card, 'cost', 0)
+        # Emit both CHARACTER_PLAYED (specific) and CHARACTER_ENTERS_PLAY (general)
+        # CHARACTER_ENTERS_PLAY is what triggered abilities listen for
+        # CHARACTER_PLAYED is for specific "played from hand" tracking
+        return [
+            {
+                'type': GameEvent.CHARACTER_ENTERS_PLAY,
+                'player': self._player,
+                'source': self.card,
+                'additional_data': {
+                    'character_played': self.card,
+                    'character_name': self.card.name if hasattr(self.card, 'name') else 'Unknown Character',
+                    'cost_paid': getattr(self.card, 'cost', 0)
+                }
+            },
+            {
+                'type': GameEvent.CHARACTER_PLAYED,
+                'player': self._player,
+                'source': self.card,
+                'additional_data': {
+                    'character_played': self.card,
+                    'character_name': self.card.name if hasattr(self.card, 'name') else 'Unknown Character',
+                    'cost_paid': getattr(self.card, 'cost', 0)
+                }
             }
-        }]
+        ]
     
     def __str__(self) -> str:
         card_name = self.card.name if hasattr(self.card, 'name') else 'Unknown Character'
@@ -1892,6 +2017,181 @@ class ConditionalEffectWrapper(Effect):
     def __str__(self) -> str:
         ability_name = self.conditional_event.get('ability_name', 'Unknown')
         return f"ConditionalEffectWrapper({ability_name})"
+
+
+class ResolveChoiceEffect(Effect):
+    """Effect that resolves a player choice."""
+    
+    def __init__(self, choice_id: str, option: str):
+        self.choice_id = choice_id
+        self.option = option
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        """Resolve a choice by providing targets to the waiting effect."""
+        logger.debug("ResolveChoiceEffect.apply called for choice {self.choice_id} with option {self.option}")
+        
+        # Get the choice manager
+        choice_manager = target
+        
+        # Find and validate the choice
+        if not hasattr(choice_manager, 'current_choice') or not choice_manager.current_choice:
+            print(f"WARNING: No current choice found in choice manager")
+            return target
+            
+        if choice_manager.current_choice.choice_id != self.choice_id:
+            print(f"WARNING: Choice ID mismatch: expected {self.choice_id}, got {choice_manager.current_choice.choice_id}")
+            return target
+        
+        # Get the selected option's target
+        selected_target = None
+        for option in choice_manager.current_choice.options:
+            if option.id == self.option:
+                selected_target = option.target
+                break
+        
+        if selected_target is None:
+            print(f"WARNING: Invalid option: {self.option}")
+            return target
+        
+        logger.debug("Selected target: {selected_target}")
+        
+        # Get the action queue to resolve the waiting action
+        action_queue = context.get('action_queue')
+        if action_queue:
+            # Provide the selected targets to the waiting action
+            selected_targets = [selected_target] if selected_target else []
+            resumed_action_id = action_queue.resolve_choice_and_continue(self.choice_id, selected_targets)
+            logger.debug("Resumed action ID: {resumed_action_id}")
+        else:
+            print(f"WARNING: No action_queue found in context")
+        
+        # Clear the current choice
+        choice_manager.current_choice = None
+        if hasattr(choice_manager, 'game_paused'):
+            choice_manager.game_paused = False
+        
+        return f"Choice resolved: {self.option}"
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for choice resolution."""
+        return []
+    
+    def __str__(self) -> str:
+        return f"resolve choice {self.choice_id} with {self.option}"
+
+
+class ChoiceGenerationEffect(Effect):
+    """Effect that generates a choice and queues the follow-up targeted effect."""
+    
+    def __init__(self, target_selector, follow_up_effect, ability_name="Unknown"):
+        self.target_selector = target_selector
+        self.follow_up_effect = follow_up_effect
+        self.ability_name = ability_name
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> str:
+        """Generate choice options and queue the follow-up effect."""
+        logger.debug("ChoiceGenerationEffect.apply called for {self.ability_name}")
+        
+        try:
+            # Generate choice options using target_selector
+            choice_options = self.target_selector.get_choice_options(context)
+            logger.debug("Generated {len(choice_options) if choice_options else 0} choice options")
+            
+            if not choice_options:
+                logger.debug("No valid choice options, skipping effect")
+                return f"No valid targets for {self.ability_name}"
+        except Exception as e:
+            logger.debug("Error generating choice options: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error generating choice for {self.ability_name}"
+        
+        # Get required managers from context
+        choice_manager = context.get('choice_manager')
+        action_queue = context.get('action_queue')
+        
+        # Add missing context from event context if available
+        event_context = context.get('event_context')
+        if event_context:
+            if not choice_manager:
+                choice_manager = getattr(event_context, 'choice_manager', None)
+            if not action_queue:
+                action_queue = getattr(event_context, 'action_queue', None)
+        
+        # If still no choice_manager, try to get it from game_state
+        if not choice_manager:
+            game_state = context.get('game_state')
+            if game_state and hasattr(game_state, 'choice_manager'):
+                choice_manager = game_state.choice_manager
+            elif game_state and hasattr(game_state, 'event_manager'):
+                # Try to get it from event_manager
+                event_manager = game_state.event_manager
+                if hasattr(event_manager, 'choice_manager'):
+                    choice_manager = event_manager.choice_manager
+        
+        
+        if not choice_manager or not action_queue:
+            logger.debug("Missing choice_manager or action_queue in context")
+            logger.debug("choice_manager: {choice_manager}")
+            logger.debug("action_queue: {action_queue}")
+            return f"Cannot generate choice for {self.ability_name}"
+        
+        try:
+            # Create a ChoiceContext object
+            from ....engine.choice_system import ChoiceContext, ChoiceType
+            
+            # Get player info
+            ability_owner = context.get('ability_owner')
+            player = ability_owner.controller if ability_owner else context.get('player')
+            
+            # Generate choice ID
+            choice_id = choice_manager.generate_choice_id()
+            
+            # Create choice context
+            choice_context = ChoiceContext(
+                choice_id=choice_id,
+                player=player,
+                ability_name=self.ability_name,
+                prompt=f"Select target enemy character for {self.ability_name}",
+                choice_type=ChoiceType.SELECT_TARGETS,
+                options=choice_options,
+                trigger_context=context,
+                timeout_seconds=None,
+                default_option=None
+            )
+            
+            # Queue the choice 
+            choice_manager.queue_choice(choice_context, target, context)
+            logger.debug("Created choice with ID: {choice_id}")
+        except Exception as e:
+            logger.debug("Error creating choice: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error creating choice for {self.ability_name}"
+        
+        try:
+            # Queue the follow-up effect to wait for choice resolution
+            from ....engine.action_queue import ActionPriority
+            action_queue.enqueue_waiting_for_choice(
+                effect=self.follow_up_effect,
+                choice_id=choice_id,
+                target=target,
+                context=context,
+                priority=ActionPriority.HIGH,
+                source_description=f"Apply selected effect for {self.ability_name}"
+            )
+            logger.debug("Successfully queued follow-up effect")
+        except Exception as e:
+            logger.debug("Error queueing follow-up effect: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error queueing effect for {self.ability_name}"
+        
+        result_msg = f"Choice generated for {self.ability_name}"
+        return result_msg
+    
+    def __str__(self) -> str:
+        return f"generate choice for {self.ability_name}"
 
 
 class NoOpEffect:

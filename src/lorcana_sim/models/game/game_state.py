@@ -214,3 +214,16 @@ class GameState:
     def __str__(self) -> str:
         """String representation of the game state."""
         return f"Turn {self.turn_number} - {self.current_phase.value.title()} Phase - {self.current_player.name}'s turn"
+    
+    def __repr__(self) -> str:
+        """Detailed representation showing player states."""
+        player_info = []
+        for i, player in enumerate(self.players):
+            indicator = "→" if i == self.current_player_index else " "
+            player_info.append(
+                f"{indicator} {player.name}: {player.lore} lore, "
+                f"hand={len(player.hand)}, deck={len(player.deck)}, ink={len(player.inkwell)}"
+            )
+        
+        players_str = " | ".join(player_info)
+        return f"GameState(Turn {self.turn_number}, {self.current_phase.value}, {players_str})"

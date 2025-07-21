@@ -3,7 +3,9 @@
 from abc import ABC, abstractmethod
 from typing import List, Any, Callable, Dict, Set, Optional
 from dataclasses import dataclass
+from ....utils.logging_config import get_game_logger
 
+logger = get_game_logger(__name__)
 
 class TargetSelector(ABC):
     """Base class for target selection."""
@@ -12,6 +14,28 @@ class TargetSelector(ABC):
     def select(self, context: Dict[str, Any]) -> List[Any]:
         """Select targets from the game state."""
         pass
+    
+    def get_choice_options(self, context: Dict[str, Any]) -> List[Any]:
+        """Get choice options for this target selector."""
+        # Default implementation: get all available targets and convert to choice options
+        targets = self.select(context)
+        if not targets:
+            return []
+        
+        # Import here to avoid circular imports
+        from ....engine.choice_system import ChoiceOption
+        
+        choice_options = []
+        for i, target in enumerate(targets):
+            target_name = getattr(target, 'name', str(target))
+            choice_options.append(ChoiceOption(
+                id=f"target_{i}",
+                description=target_name,
+                target=target,
+                effect=None  # No effect needed for target selection
+            ))
+        
+        return choice_options
     
     def __add__(self, other: 'TargetSelector') -> 'UnionSelector':
         """Union of targets with +"""
@@ -37,6 +61,151 @@ class CharacterSelector(TargetSelector):
         self.count = count
     
     def select(self, context: Dict[str, Any]) -> List[Any]:
+        logger.debug("CharacterSelector.select called with context keys: {context.keys()}")
+        
+        game_state = context.get('game_state')
+        if not game_state:
+            # Try to get from event_context
+            event_context = context.get('event_context')
+            if event_context:
+                game_state = event_context.game_state
+        
+        if not game_state:
+            logger.debug("No game_state found in context")
+            return []
+        
+        logger.debug("Found game_state, looking for characters")
+        
+        # Get all characters from all players
+        all_characters = []
+        if hasattr(game_state, 'all_players'):
+            for player in game_state.all_players:
+                if hasattr(player, 'characters_in_play'):
+                    all_characters.extend(player.characters_in_play)
+                    logger.debug("Added {len(player.characters_in_play)} characters from player {player.name}")
+        elif hasattr(game_state, 'current_player') and hasattr(game_state, 'opponent'):
+            # Handle both players
+            for player in [game_state.current_player, game_state.opponent]:
+                if hasattr(player, 'characters_in_play'):
+                    all_characters.extend(player.characters_in_play)
+                    logger.debug("Added {len(player.characters_in_play)} characters from player {player.name}")
+        
+        logger.debug("Total characters found: {len(all_characters)}")
+        
+        # Apply filter
+        valid_characters = [char for char in all_characters 
+                          if self.filter_func(char, context)]
+        
+        logger.debug("Valid characters after filter: {len(valid_characters)} - {[c.name for c in valid_characters]}")
+        
+        # Check if choice is needed
+        if self.requires_choice(valid_characters, context):
+            logger.debug("Choice is required for {len(valid_characters)} targets")
+            choice_manager = context.get('choice_manager')
+            if choice_manager:
+                logger.debug("Choice manager found, generating choice")
+                # Generate choice
+                choice = self.create_target_choice(valid_characters, context)
+                choice_manager.queue_choice(choice, valid_characters, context)
+                
+                # Return None to signal choice pending
+                logger.debug("Returning None to signal choice pending")
+                return None
+            else:
+                logger.debug("No choice manager found in context")
+        
+        # Auto-select when no choice needed or no choice manager available
+        result = valid_characters[:self.count]
+        logger.debug("Auto-selecting {len(result)} targets: {[c.name for c in result]}")
+        return result
+    
+    def requires_choice(self, valid_targets: List[Any], context: Dict[str, Any]) -> bool:
+        """Determine if player choice is needed."""
+        # Choice needed when more targets available than can be selected
+        # and it's not a "select all" scenario
+        return (len(valid_targets) > self.count and 
+                self.count < 999 and  # 999 = "all"
+                self.count > 0)       # 0 = "none"
+    
+    def create_target_choice(self, valid_targets: List[Any], 
+                           context: Dict[str, Any]):
+        """Create a Choice object for target selection."""
+        from ....engine.choice_system import ChoiceContext, ChoiceOption, ChoiceType
+        from ....models.abilities.composable.effects import NoEffect
+        
+        # Get choice manager to generate choice ID
+        choice_manager = context.get('choice_manager')
+        if not choice_manager:
+            return None
+        
+        # Create options from valid targets
+        options = []
+        for i, target in enumerate(valid_targets):
+            # Create a special effect that stores the selected target in the context
+            from ....models.abilities.composable.effects import StoreTargetEffect
+            
+            try:
+                controller_name = target.controller.name if hasattr(target, 'controller') and target.controller else 'Unknown'
+                option = ChoiceOption(
+                    id=f"target_{i}",
+                    description=f"{target.name} ({controller_name})",
+                    effect=StoreTargetEffect(target),  # Store the selected target
+                    target=target,      # Store target for later use
+                    data={'character': target}
+                )
+                logger.debug("Created choice option {i}: {option.description}")
+            except Exception as e:
+                logger.debug("Error creating choice option for {target}: {e}")
+                raise
+            options.append(option)
+        
+        # Add "none" option if selection is optional ("may" effects)
+        is_optional = context.get('optional', True)
+        if is_optional:
+            from ....models.abilities.composable.effects import StoreTargetEffect
+            
+            options.append(ChoiceOption(
+                id="none",
+                description="Choose no target",
+                effect=StoreTargetEffect(None),  # Store None as the selected target
+                target=None,
+                data={}
+            ))
+        
+        # Get ability info for the choice prompt
+        ability_name = context.get('ability_name', 'Unknown Ability')
+        ability_owner = context.get('ability_owner')
+        player = ability_owner.controller if ability_owner else context.get('player')
+        
+        return ChoiceContext(
+            choice_id=choice_manager.generate_choice_id(),
+            player=player,
+            ability_name=ability_name,
+            prompt=self.get_choice_prompt(context),
+            choice_type=ChoiceType.SELECT_TARGETS,
+            options=options,
+            trigger_context=context,
+            timeout_seconds=None,
+            default_option="none" if is_optional else None
+        )
+    
+    def get_choice_prompt(self, context: Dict[str, Any]) -> str:
+        """Generate a user-friendly prompt for target selection."""
+        ability_name = context.get('ability_name', 'ability')
+        
+        if self.count == 1:
+            if 'enemy' in str(self.filter_func):
+                return f"Select target enemy character for {ability_name}"
+            elif 'friendly' in str(self.filter_func):
+                return f"Select target friendly character for {ability_name}"
+            else:
+                return f"Select target character for {ability_name}"
+        else:
+            return f"Select up to {self.count} target characters for {ability_name}"
+    
+    def get_choice_options(self, context: Dict[str, Any]) -> List[Any]:
+        """Get choice options for character selection, bypassing old choice logic."""
+        # Get valid targets directly without triggering the old choice system
         game_state = context.get('game_state')
         if not game_state:
             # Try to get from event_context
@@ -59,13 +228,28 @@ class CharacterSelector(TargetSelector):
                 if hasattr(player, 'characters_in_play'):
                     all_characters.extend(player.characters_in_play)
         
-        # Apply filter
+        # Apply filter to get valid targets
         valid_characters = [char for char in all_characters 
                           if self.filter_func(char, context)]
         
-        # Return up to count characters
-        # In real implementation, this would trigger targeting UI if count > len(valid_characters)
-        return valid_characters[:self.count]
+        if not valid_characters:
+            return []
+        
+        # Convert targets to choice options
+        from ....engine.choice_system import ChoiceOption
+        
+        choice_options = []
+        for i, target in enumerate(valid_characters):
+            controller_name = getattr(target.controller, 'name', 'Unknown') if hasattr(target, 'controller') else 'Unknown'
+            target_name = getattr(target, 'name', str(target))
+            choice_options.append(ChoiceOption(
+                id=f"target_{i}",
+                description=f"{target_name} ({controller_name})",
+                target=target,
+                effect=None  # No effect needed for target selection
+            ))
+        
+        return choice_options
     
     def __str__(self) -> str:
         return f"CharacterSelector(count={self.count})"

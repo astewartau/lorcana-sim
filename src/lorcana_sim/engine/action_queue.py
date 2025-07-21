@@ -8,7 +8,9 @@ import uuid
 
 from ..models.abilities.composable.effects import Effect
 from .event_system import GameEvent, EventContext, GameEventManager
+from ..utils.logging_config import get_game_logger
 
+logger = get_game_logger(__name__)
 
 class ActionPriority(Enum):
     """Priority levels for action execution."""
@@ -28,6 +30,7 @@ class QueuedAction:
     context: Dict[str, Any]
     priority: ActionPriority = ActionPriority.NORMAL
     source_description: str = ""  # Human-readable source of this action
+    waiting_for_choice: Optional[str] = None  # Choice ID this action is waiting for
     
     def __post_init__(self):
         if not self.action_id:
@@ -54,6 +57,7 @@ class ActionQueue:
         self._paused = False
         self._execution_history: List[ActionResult] = []
         self._current_action: Optional[QueuedAction] = None
+        self._waiting_actions: Dict[str, QueuedAction] = {}  # Actions waiting for choice resolution
         
     def enqueue(self, effect: Effect, target: Any, context: Dict[str, Any], 
                 priority: ActionPriority = ActionPriority.NORMAL,
@@ -143,84 +147,82 @@ class ActionQueue:
         action = self._queue.popleft()
         self._current_action = action
         
-        try:
-            # Check if this is a composite effect that needs splitting
-            if not apply_effect and self._is_composite_effect(action.effect):
-                return self._process_composite_effect(action)
+        # Check if this is a composite effect that needs splitting
+        if not apply_effect and self._is_composite_effect(action.effect):
+            return self._process_composite_effect(action)
+        
+        # Only execute the effect if requested
+        result = None
+        if apply_effect:
+            result = action.effect.apply(action.target, action.context)
             
-            # Only execute the effect if requested
-            result = None
-            if apply_effect:
-                result = action.effect.apply(action.target, action.context)
+            # Check if this is a TargetedEffect that returned unchanged target (choice pending)
+            from ..models.abilities.composable.effects import TargetedEffect
+            if isinstance(action.effect, TargetedEffect) and result == action.target:
+                # Choice might be pending - check if choice manager has pending choices
+                choice_manager = action.context.get('choice_manager')
+                if choice_manager and choice_manager.is_game_paused():
+                    # Put the action back at the front of the queue for later processing
+                    self._queue.appendleft(action)
+                    self._current_action = None
+                    # Pause the queue
+                    self._paused = True
+                    # Return None to indicate processing was paused
+                    return None
+        
+        # Get events that this effect declares (preview mode if not applied)
+        events = []
+        if hasattr(action.effect, 'get_events'):
+            # For preview, pass the target as the result since effect wasn't applied
+            preview_result = result if apply_effect else action.target
+            events = action.effect.get_events(action.target, action.context, preview_result)
+        
+        # Only emit events if the effect was actually applied
+        emitted_events = []
+        if apply_effect:
+            for event_data in events:
+                # Create EventContext from event data
+                event_type = event_data.get('type')
+                if isinstance(event_type, str):
+                    # Convert string to GameEvent enum if needed
+                    event_type = GameEvent(event_type)
             
-            # Get events that this effect declares (preview mode if not applied)
-            events = []
-            if hasattr(action.effect, 'get_events'):
-                # For preview, pass the target as the result since effect wasn't applied
-                preview_result = result if apply_effect else action.target
-                events = action.effect.get_events(action.target, action.context, preview_result)
-            
-            # Only emit events if the effect was actually applied
-            emitted_events = []
-            if apply_effect:
-                for event_data in events:
-                    # Create EventContext from event data
-                    event_type = event_data.get('type')
-                    if isinstance(event_type, str):
-                        # Convert string to GameEvent enum if needed
-                        event_type = GameEvent(event_type)
+                event_context = EventContext(
+                    event_type=event_type,
+                    source=event_data.get('source', action.target),
+                    target=event_data.get('target'),
+                    player=event_data.get('player'),
+                    game_state=action.context.get('game_state'),
+                    additional_data=event_data.get('additional_data', {})
+                )
                 
-                    event_context = EventContext(
-                        event_type=event_type,
-                        source=event_data.get('source', action.target),
-                        target=event_data.get('target'),
-                        player=event_data.get('player'),
-                        game_state=action.context.get('game_state'),
-                        additional_data=event_data.get('additional_data', {})
-                    )
-                    
-                    # Trigger the event
-                    self.event_manager.trigger_event(event_context)
-                    emitted_events.append(event_data)
-                
-                # Also collect events in game_state.choice_events for choice-triggered effects
-                game_state = action.context.get('game_state')
-                if game_state and hasattr(game_state, 'choice_events'):
-                    game_state.choice_events.extend(events)
-            else:
-                # For deferred effects, store the events to be processed later
-                game_state = action.context.get('game_state')
-                if game_state and hasattr(game_state, 'choice_events'):
-                    game_state.choice_events.extend(events)
+                # Trigger the event
+                self.event_manager.trigger_event(event_context)
+                emitted_events.append(event_data)
             
-            # Create result
-            action_result = ActionResult(
-                action_id=action.action_id,
-                success=True,
-                result=result,
-                events_emitted=emitted_events,
-                queued_action=action  # Always store action for message creation
-            )
+            # Also collect events in game_state.choice_events for choice-triggered effects
+            game_state = action.context.get('game_state')
+            if game_state and hasattr(game_state, 'choice_events'):
+                game_state.choice_events.extend(events)
+        else:
+            # For deferred effects, store the events to be processed later
+            game_state = action.context.get('game_state')
+            if game_state and hasattr(game_state, 'choice_events'):
+                game_state.choice_events.extend(events)
+        
+        # Create result
+        action_result = ActionResult(
+            action_id=action.action_id,
+            success=True,
+            result=result,
+            events_emitted=emitted_events,
+            queued_action=action  # Always store action for message creation
+        )
+        
+        self._execution_history.append(action_result)
+        self._current_action = None
             
-            self._execution_history.append(action_result)
-            self._current_action = None
-            
-            return action_result
-            
-        except Exception as e:
-            # Handle execution errors
-            action_result = ActionResult(
-                action_id=action.action_id,
-                success=False,
-                result=None,
-                events_emitted=[],
-                error=str(e)
-            )
-            
-            self._execution_history.append(action_result)
-            self._current_action = None
-            
-            return action_result
+        return action_result
     
     def process_all_actions(self) -> List[ActionResult]:
         """
@@ -244,6 +246,11 @@ class ActionQueue:
     def resume(self):
         """Resume action processing."""
         self._paused = False
+    
+    def resume_after_choice(self):
+        """Resume action processing after a choice has been resolved."""
+        self._paused = False
+        # The paused action should be at the front of the queue and can now be processed
     
     def is_paused(self) -> bool:
         """Check if the queue is paused."""
@@ -344,3 +351,71 @@ class ActionQueue:
             'error': result.error,
             'events_emitted': result.events_emitted
         }
+    
+    def enqueue_waiting_for_choice(self, effect: Effect, choice_id: str, target: Any, 
+                                   context: Dict[str, Any], priority: ActionPriority = ActionPriority.NORMAL,
+                                   source_description: str = "") -> str:
+        """
+        Queue an effect that waits for a specific choice to be resolved.
+        
+        Args:
+            effect: The effect to queue
+            choice_id: The choice ID this effect is waiting for
+            target: The target for the effect
+            context: The context for the effect
+            priority: The priority level for the effect
+            source_description: Human-readable source description
+            
+        Returns:
+            The action ID for tracking
+        """
+        action = QueuedAction(
+            action_id=str(uuid.uuid4()),
+            effect=effect,
+            target=target,
+            context=context,
+            priority=priority,
+            source_description=source_description,
+            waiting_for_choice=choice_id
+        )
+        
+        self._waiting_actions[choice_id] = action
+        logger.debug("ActionQueue.enqueue_waiting_for_choice - stored action {action.action_id} for choice {choice_id}")
+        
+        return action.action_id
+    
+    def resolve_choice_and_continue(self, choice_id: str, selected_targets: List[Any]) -> Optional[str]:
+        """
+        Find waiting action and provide it with resolved targets, then queue it for execution.
+        
+        Args:
+            choice_id: The choice ID that was resolved
+            selected_targets: The targets selected by the choice resolution
+            
+        Returns:
+            The action ID if an action was resumed, None otherwise
+        """
+        if choice_id in self._waiting_actions:
+            action = self._waiting_actions.pop(choice_id)
+            logger.debug("ActionQueue.resolve_choice_and_continue - found waiting action {action.action_id}")
+            
+            # Add the resolved targets to the context
+            action.context['resolved_targets'] = selected_targets
+            action.waiting_for_choice = None  # Clear the waiting state
+            
+            # Queue the action for immediate execution
+            self._queue.appendleft(action)  # Use appendleft for immediate priority
+            logger.debug("ActionQueue.resolve_choice_and_continue - queued action {action.action_id} for execution")
+            
+            return action.action_id
+        else:
+            logger.debug("ActionQueue.resolve_choice_and_continue - no waiting action found for choice {choice_id}")
+            return None
+    
+    def get_waiting_actions_count(self) -> int:
+        """Get the number of actions waiting for choice resolution."""
+        return len(self._waiting_actions)
+    
+    def get_waiting_action_for_choice(self, choice_id: str) -> Optional[QueuedAction]:
+        """Get the action waiting for a specific choice."""
+        return self._waiting_actions.get(choice_id)

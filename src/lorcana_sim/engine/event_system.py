@@ -11,6 +11,9 @@ if TYPE_CHECKING:
     # NOTE: StepProgressionEngine removed in Phase 4
 
 from ..models.abilities.composable.conditional_effects import ActivationZone
+from ..utils.logging_config import get_game_logger
+
+logger = get_game_logger(__name__)
 
 
 def get_card_current_zone(card: Any, game_state: 'GameState') -> Optional['ActivationZone']:
@@ -246,35 +249,43 @@ class GameEventManager:
         """Execute an event (internal method)."""
         results = []
         
+        # DEBUG: Trace event triggering
+        logger.debug(f"Triggering event {event_context.event_type.value} with source {getattr(event_context, 'source', None)}")
+        
         # Trigger composable abilities
         composable_abilities = self._composable_listeners.get(event_context.event_type, [])
+        logger.debug(f"Found {len(composable_abilities)} abilities listening for {event_context.event_type.value}")
         
         for ability in composable_abilities:
-            try:
-                # NEW: Check if source card is in valid zone for this ability
-                source_card = getattr(ability, 'character', None)
-                if source_card:
-                    current_zone = get_card_current_zone(source_card, event_context.game_state)
-                    if current_zone not in ability.activation_zones:
-                        # Skip this ability if card is not in valid zone
-                        continue
-                
-                # NOTE: Step-based abilities removed in Phase 4
-                # All abilities now use effect-based execution through ActionQueue
-                
-                # Execute immediately for simple abilities - only log if something actually triggered
-                triggered = False
-                for listener in ability.listeners:
-                    if listener.should_trigger(event_context):
-                        triggered = True
-                        break
-                
-                if triggered:
-                    ability.handle_event(event_context)
-                    # Don't generate immediate messages - let the action queue handle messaging
-                    # when effects are actually executed
-            except Exception as e:
-                results.append(f"Error executing composable ability {ability}: {str(e)}")
+            logger.debug(f"Checking ability {getattr(ability, 'name', 'unknown')} with character {getattr(ability, 'character', None)}")
+            
+            # NEW: Check if source card is in valid zone for this ability
+            source_card = getattr(ability, 'character', None)
+            if source_card:
+                current_zone = get_card_current_zone(source_card, event_context.game_state)
+                logger.debug(f"Source card {source_card} is in zone {current_zone}, ability activation zones: {getattr(ability, 'activation_zones', 'unknown')}")
+                if current_zone not in ability.activation_zones:
+                    # Skip this ability if card is not in valid zone
+                    logger.debug(f"Skipping ability - card not in valid zone")
+                    continue
+            
+            # NOTE: Step-based abilities removed in Phase 4
+            # All abilities now use effect-based execution through ActionQueue
+            
+            # Execute immediately for simple abilities - only log if something actually triggered
+            triggered = False
+            for listener in ability.listeners:
+                logger.debug(f"Checking listener {listener} should_trigger result: {listener.should_trigger(event_context)}")
+                if listener.should_trigger(event_context):
+                    triggered = True
+                    break
+            
+            logger.debug(f"Ability triggered: {triggered}")
+            if triggered:
+                logger.debug(f"Calling ability.handle_event for {getattr(ability, 'name', 'unknown')}")
+                ability.handle_event(event_context)
+                # Don't generate immediate messages - let the action queue handle messaging
+                # when effects are actually executed
         
         # Evaluate passive abilities after event processing
         passive_results = self._evaluate_passive_abilities()
