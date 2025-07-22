@@ -277,22 +277,30 @@ class MoveValidator:
         if singer.exerted:
             return False
         
-        # Check composable abilities for Singer
+        # Get the required cost to sing this song
         required_cost = self._get_song_singer_cost(song)
-        for ability in singer.composable_abilities:
-            if ability.can_sing_song(required_cost):
-                return True
+        
+        # Check composable abilities for Singer
+        if hasattr(singer, 'composable_abilities') and singer.composable_abilities:
+            for ability in singer.composable_abilities:
+                if hasattr(ability, 'can_sing_song') and ability.can_sing_song(required_cost):
+                    return True
+        
+        # Check if character's basic cost meets the song requirement
+        # Songs like "Characters with cost 3 or more can sing this song"
+        if singer.cost >= required_cost:
+            return True
         
         return False
     
     def _get_song_singer_cost(self, song: ActionCard) -> int:
         """Extract the singer cost requirement from a song."""
-        # Try to parse the singer cost from song abilities
-        for ability in song.abilities:
-            if hasattr(ability, 'effect') and "sing this song" in ability.effect.lower():
-                # Try to extract cost from text like "A character with cost X or more can sing this song"
+        # Try to parse the singer cost from song effects (ActionCard has effects, not abilities)
+        for effect in song.effects:
+            if "sing this song" in effect.lower():
+                # Try to extract cost from text like "Characters with cost X or more can sing this song"
                 import re
-                match = re.search(r'cost (\d+)', ability.effect.lower())
+                match = re.search(r'cost (\d+)', effect.lower())
                 if match:
                     return int(match.group(1))
         

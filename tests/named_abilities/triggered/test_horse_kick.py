@@ -93,14 +93,14 @@ class TestHorseKickIntegration(GameEngineTestBase):
         # Verify choice message
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
-        # Choose the strong opponent (assume index 0)
-        target_choice = ChoiceMove(choice_index=0)  # Choose first opponent
+        # Choose the strong opponent (get actual choice from message)
+        assert len(choice_message.choice.options) >= 2  # Should have multiple targets
+        selected_option = choice_message.choice.options[1].id  # Choose second option (opponent)
+        target_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(target_choice)
         
-        # Get the effect message
+        # Get the effect execution message (newly queued effect)
         effect_message = self.game_engine.next_message()
-        assert effect_message.type == MessageType.STEP_EXECUTED
-        # Verify effect message
         assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Verify the chosen opponent's strength was reduced by 2
@@ -146,12 +146,12 @@ class TestHorseKickIntegration(GameEngineTestBase):
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose the friendly character
-        target_choice = ChoiceMove(choice_index=0)
+        selected_option = choice_message.choice.options[0].id  # First option should be friendly
+        target_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(target_choice)
         
-        # Get effect message
+        # Get the effect execution message (newly queued effect)
         effect_message = self.game_engine.next_message()
-        # Verify effect message
         assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Verify friendly character's strength was reduced
@@ -192,11 +192,13 @@ class TestHorseKickIntegration(GameEngineTestBase):
         choice_message = self.game_engine.next_message()
         
         # Choose the weak character
-        target_choice = ChoiceMove(choice_index=0)
+        selected_option = choice_message.choice.options[1].id  # Choose target_1 (weak character, not self)
+        target_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(target_choice)
         
-        # Get effect message
+        # Get the effect execution message (newly queued effect)
         effect_message = self.game_engine.next_message()
+        assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Verify strength reduction (may go to 0 or negative, depending on implementation)
         expected_strength = max(0, initial_strength - 2)  # Assuming strength can't go negative
@@ -228,9 +230,9 @@ class TestHorseKickIntegration(GameEngineTestBase):
         
         # Record initial strengths
         initial_strengths = {
-            target1: target1.current_strength,
-            target2: target2.current_strength,
-            target3: target3.current_strength
+            'target1': target1.current_strength,
+            'target2': target2.current_strength,
+            'target3': target3.current_strength
         }
         
         # Play the kick character
@@ -246,17 +248,19 @@ class TestHorseKickIntegration(GameEngineTestBase):
         choice_message = self.game_engine.next_message()
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
-        # Choose target 2 (assuming it's choice index 1)
-        target_choice = ChoiceMove(choice_index=1)
+        # Choose target 2 (target_2 in choice options)
+        selected_option = choice_message.choice.options[2].id
+        target_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(target_choice)
         
-        # Get effect message
+        # Get the effect execution message (newly queued effect)
         effect_message = self.game_engine.next_message()
+        assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Verify only chosen target was affected
-        assert target1.current_strength == initial_strengths[target1]  # Unchanged
-        assert target2.current_strength == initial_strengths[target2] - 2  # Reduced
-        assert target3.current_strength == initial_strengths[target3]  # Unchanged
+        assert target1.current_strength == initial_strengths['target1']  # Unchanged
+        assert target2.current_strength == initial_strengths['target2'] - 2  # Reduced
+        assert target3.current_strength == initial_strengths['target3']  # Unchanged
     
     def test_horse_kick_with_no_valid_targets(self):
         """Test HORSE KICK when no valid targets exist."""
@@ -322,10 +326,13 @@ class TestHorseKickIntegration(GameEngineTestBase):
         trigger_message = self.game_engine.next_message()
         choice_message = self.game_engine.next_message()
         
-        target_choice = ChoiceMove(choice_index=0)
+        selected_option = choice_message.choice.options[1].id  # Choose target_1 (actual target, not self)
+        target_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(target_choice)
         
+        # Get the effect execution message (newly queued effect)
         effect_message = self.game_engine.next_message()
+        assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Verify strength was reduced
         assert target_character.current_strength == initial_strength - 2
@@ -371,9 +378,12 @@ class TestHorseKickIntegration(GameEngineTestBase):
         # Process first kick
         trigger1 = self.game_engine.next_message()
         choice1 = self.game_engine.next_message()
-        target_choice1 = ChoiceMove(choice_index=0)
+        selected_option1 = choice1.choice.options[1].id  # Choose target_1 (target character, not self)
+        target_choice1 = ChoiceMove(choice_id=choice1.choice.choice_id, option=selected_option1)
         result1 = self.game_engine.next_message(target_choice1)
+        # Get the effect execution message (newly queued effect)
         effect1 = self.game_engine.next_message()
+        assert effect1.type == MessageType.STEP_EXECUTED
         
         # Verify first reduction
         assert target_character.current_strength == initial_strength - 2
@@ -385,9 +395,12 @@ class TestHorseKickIntegration(GameEngineTestBase):
         # Process second kick
         trigger2 = self.game_engine.next_message()
         choice2 = self.game_engine.next_message()
-        target_choice2 = ChoiceMove(choice_index=0)
+        selected_option2 = choice2.choice.options[2].id  # Choose target_2 (target character, not kick characters)
+        target_choice2 = ChoiceMove(choice_id=choice2.choice.choice_id, option=selected_option2)
         result2 = self.game_engine.next_message(target_choice2)
+        # Get the effect execution message (newly queued effect)
         effect2 = self.game_engine.next_message()
+        assert effect2.type == MessageType.STEP_EXECUTED
         
         # Verify cumulative reduction
         assert target_character.current_strength == initial_strength - 4

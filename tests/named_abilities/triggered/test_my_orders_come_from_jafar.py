@@ -125,7 +125,8 @@ class TestMyOrdersComeFromJafarIntegration(GameEngineTestBase):
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose to banish the enemy item
-        banish_choice = ChoiceMove(choice_index=0)  # Assume enemy item is first choice
+        selected_option = choice_message.choice.options[0].id  # Assume enemy item is first choice
+        banish_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(banish_choice)
         
         # Get the banish effect message
@@ -245,7 +246,9 @@ class TestMyOrdersComeFromJafarIntegration(GameEngineTestBase):
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose NOT to banish (assuming there's a "decline" option)
-        decline_choice = ChoiceMove(choice_index=-1)  # Or whatever represents "no"
+        # Find the "No" option - it's usually the last one
+        decline_option = choice_message.choice.options[-1].id  # Or whatever represents "no"
+        decline_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=decline_option)
         choice_result = self.game_engine.next_message(decline_choice)
         
         # Item should remain in play
@@ -290,7 +293,8 @@ class TestMyOrdersComeFromJafarIntegration(GameEngineTestBase):
         choice_message = self.game_engine.next_message()
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
-        banish_choice = ChoiceMove(choice_index=0)
+        selected_option = choice_message.choice.options[0].id
+        banish_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(banish_choice)
         
         effect_message = self.game_engine.next_message()
@@ -336,7 +340,8 @@ class TestMyOrdersComeFromJafarIntegration(GameEngineTestBase):
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose to banish one of the enemy items
-        banish_choice = ChoiceMove(choice_index=2)  # Assuming enemy items come after friendly
+        selected_option = choice_message.choice.options[2].id  # Assuming enemy items come after friendly
+        banish_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(banish_choice)
         
         effect_message = self.game_engine.next_message()

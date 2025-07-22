@@ -13,7 +13,11 @@ def create_dance_off(character: Any, ability_data: dict):
     """DANCE-OFF - Whenever this character or one of your characters named Mickey Mouse challenges another character, gain 1 lore.
     
     Implementation: When this character or any Mickey Mouse character challenges, gain 1 lore.
+    Uses quick_ability since CONTROLLER doesn't require user choices.
     """
+    from ...composable_ability import ComposableAbility
+    from ...effects import GainLoreEffect
+    
     def mickey_mouse_challenge_trigger(character: Any):
         """Trigger for when any Mickey Mouse character challenges."""
         def trigger_func(event, context):
@@ -32,13 +36,14 @@ def create_dance_off(character: Any, ability_data: dict):
             return False
         return trigger_func
     
+    # Use quick_ability since CONTROLLER doesn't need user choices
     return quick_ability(
-        "DANCE-OFF",
-        character,
-        or_conditions(
+        name="DANCE-OFF",
+        character=character,
+        trigger_condition=or_conditions(
             when_challenges(character),
             mickey_mouse_challenge_trigger(character)
         ),
-        CONTROLLER,
-        GAIN_LORE(1)
+        target_selector=CONTROLLER,
+        effect=GainLoreEffect(1)
     )

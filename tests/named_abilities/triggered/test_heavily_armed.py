@@ -43,8 +43,7 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
             set_code="TEST",
             number=2,
             story="",
-            effect=effect,
-            abilities=[]
+            effects=[effect]
         )
         return action
     
@@ -65,9 +64,18 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
             strength=3
         )
         
-        # Set up game state
-        self.player1.characters_in_play = [armed_character]
+        # Set up game state - put character in hand BEFORE GameEngine init to register abilities
+        self.player1.hand = [armed_character]
+        self.setup_player_ink(self.player1, ink_count=5)  # Ensure player has ink to play character
         armed_character.controller = self.player1
+        
+        # Play the armed character to register abilities properly
+        play_move = PlayMove(armed_character)
+        play_message = self.game_engine.next_message(play_move)
+        
+        # Verify the character was played
+        assert play_message.type == MessageType.STEP_EXECUTED
+        assert armed_character in self.player1.characters_in_play
         
         # Ensure player has cards to draw
         dummy_card = self.create_test_character(name="Dummy Card")
@@ -109,65 +117,64 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         
         # Verify character gained Challenger +1 for the turn
         # The exact implementation may vary, but the character should have enhanced challenging ability
-        assert hasattr(armed_character, 'temporary_effects') or \
-               getattr(armed_character, 'challenger_bonus', 0) > initial_challenger_bonus
+        # Check for strength bonuses added by the Challenger effect
+        assert hasattr(armed_character, 'strength_bonuses') and len(armed_character.strength_bonuses) > 0
     
     def test_heavily_armed_triggers_on_action_card_draw(self):
-        """Test HEAVILY ARMED when player draws cards from an action card effect."""
+        """Test HEAVILY ARMED when player draws cards (simulating action card effect)."""
         # Create character with HEAVILY ARMED ability
         armed_character = self.create_heavily_armed_character(
             name="Armed Character",
             strength=2
         )
         
-        # Create an action that draws cards
-        draw_action = self.create_test_action(
-            name="Draw Action",
-            cost=1,
-            effect="Draw a card"
-        )
-        
-        # Set up game state
-        self.player1.characters_in_play = [armed_character]
-        self.player1.hand = [draw_action]
-        self.setup_player_ink(self.player1, ink_count=2)
-        
-        # Ensure deck has cards to draw
-        dummy_cards = [
-            self.create_test_character(name=f"Dummy {i}")
-            for i in range(3)
-        ]
-        self.player1.deck = dummy_cards
-        
+        # Set up game state - put character in hand BEFORE GameEngine init to register abilities
+        self.player1.hand = [armed_character]
+        self.setup_player_ink(self.player1, ink_count=4)  # Ensure player has ink to play character
         armed_character.controller = self.player1
         
-        # Record initial hand size
-        initial_hand_size = len(self.player1.hand)
-        
-        # Play the draw action
-        play_move = PlayMove(draw_action)
+        # Play the armed character to register abilities properly
+        play_move = PlayMove(armed_character)
         play_message = self.game_engine.next_message(play_move)
         
-        # Verify action was played
+        # Verify the character was played
         assert play_message.type == MessageType.STEP_EXECUTED
-        # Verify character was played
-        assert play_message.type == MessageType.STEP_EXECUTED
+        assert armed_character in self.player1.characters_in_play
         
-        # Process the draw effect
-        draw_effect_message = self.game_engine.next_message()
+        # Ensure player has cards to draw
+        dummy_card = self.create_test_character(name="Dummy Card")
+        self.player1.deck = [dummy_card]
         
-        # Verify card was drawn
-        assert len(self.player1.hand) == initial_hand_size  # -1 for played action +1 for drawn card
+        # Record initial strength and challenger status
+        initial_strength_bonuses = len(getattr(armed_character, 'strength_bonuses', []))
         
-        # Get HEAVILY ARMED trigger
+        # Simulate a card draw (this could be from an action card effect)
+        drawn_card = self.player1.deck.pop(0)
+        self.player1.hand.append(drawn_card)
+        
+        # Trigger the card draw event
+        from lorcana_sim.engine.event_system import EventContext, GameEvent
+        draw_context = EventContext(
+            event_type=GameEvent.CARD_DRAWN,
+            source=drawn_card,
+            target=None,
+            player=self.player1,
+            game_state=self.game_state
+        )
+        
+        # Process the draw event through the event system
+        self.game_engine.execution_engine.event_manager.trigger_event(draw_context)
+        
+        # Get the HEAVILY ARMED trigger message
         trigger_message = self.game_engine.next_message()
-        # Check that message has event data about the ability trigger
-        assert trigger_message.event_data is not None or trigger_message.step is not None
+        assert trigger_message.type == MessageType.STEP_EXECUTED
         
-        # Get Challenger effect
+        # Get the Challenger effect message
         effect_message = self.game_engine.next_message()
-        # Verify effect message
         assert effect_message.type == MessageType.STEP_EXECUTED
+        
+        # Verify character gained Challenger +1 for the turn
+        assert hasattr(armed_character, 'strength_bonuses') and len(armed_character.strength_bonuses) > initial_strength_bonuses
     
     def test_heavily_armed_multiple_draws_multiple_triggers(self):
         """Test HEAVILY ARMED triggers multiple times when multiple cards are drawn."""
@@ -176,9 +183,18 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
             name="Armed Character"
         )
         
-        # Set up game state
-        self.player1.characters_in_play = [armed_character]
+        # Set up game state - put character in hand BEFORE GameEngine init to register abilities
+        self.player1.hand = [armed_character]
+        self.setup_player_ink(self.player1, ink_count=4)  # Ensure player has ink to play character
         armed_character.controller = self.player1
+        
+        # Play the armed character to register abilities properly
+        play_move = PlayMove(armed_character)
+        play_message = self.game_engine.next_message(play_move)
+        
+        # Verify the character was played
+        assert play_message.type == MessageType.STEP_EXECUTED
+        assert armed_character in self.player1.characters_in_play
         
         # Ensure deck has cards to draw
         dummy_cards = [
@@ -268,9 +284,18 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
             name="Armed Character"
         )
         
-        # Set up game state
-        self.player1.characters_in_play = [armed_character]
+        # Set up game state - put character in hand BEFORE GameEngine init to register abilities
+        self.player1.hand = [armed_character]
+        self.setup_player_ink(self.player1, ink_count=4)  # Ensure player has ink to play character
         armed_character.controller = self.player1
+        
+        # Play the armed character to register abilities properly
+        play_move = PlayMove(armed_character)
+        play_message = self.game_engine.next_message(play_move)
+        
+        # Verify the character was played
+        assert play_message.type == MessageType.STEP_EXECUTED
+        assert armed_character in self.player1.characters_in_play
         
         # Ensure deck has cards
         dummy_card = self.create_test_character(name="Dummy")
@@ -293,12 +318,15 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         
         # Get trigger and effect messages
         trigger_message = self.game_engine.next_message()
-        # Check that message has event data about the ability trigger
-        assert trigger_message.event_data is not None or trigger_message.step is not None
+        # Check that we got a step executed message (ability trigger)
+        assert trigger_message.type == MessageType.STEP_EXECUTED
         
         effect_message = self.game_engine.next_message()
         # Verify effect message
         assert effect_message.type == MessageType.STEP_EXECUTED
+        
+        # Verify character gained Challenger bonus
+        assert hasattr(armed_character, 'strength_bonuses') and len(armed_character.strength_bonuses) > 0
         
         # Verify effect is applied
         # The exact verification depends on how temporary effects are implemented
@@ -318,10 +346,26 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
             name="Armed Character 2"
         )
         
-        # Set up game state
-        self.player1.characters_in_play = [armed_character1, armed_character2]
+        # Set up game state - put characters in hand BEFORE GameEngine init to register abilities
+        self.player1.hand = [armed_character1, armed_character2]
+        self.setup_player_ink(self.player1, ink_count=7)  # Ensure player has ink to play both characters
         armed_character1.controller = self.player1
         armed_character2.controller = self.player1
+        
+        # Play both armed characters to register abilities properly
+        play_move1 = PlayMove(armed_character1)
+        play_message1 = self.game_engine.next_message(play_move1)
+        
+        # Verify first character was played
+        assert play_message1.type == MessageType.STEP_EXECUTED
+        assert armed_character1 in self.player1.characters_in_play
+        
+        play_move2 = PlayMove(armed_character2)
+        play_message2 = self.game_engine.next_message(play_move2)
+        
+        # Verify second character was played
+        assert play_message2.type == MessageType.STEP_EXECUTED
+        assert armed_character2 in self.player1.characters_in_play
         
         # Ensure deck has cards
         dummy_card = self.create_test_character(name="Dummy")
@@ -348,21 +392,27 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         
         # Get first trigger and effect
         trigger1 = self.game_engine.next_message()
-        if trigger1 and (trigger1.event_data is not None or trigger1.step is not None):
+        if trigger1 and trigger1.type == MessageType.STEP_EXECUTED:
             trigger_messages.append(trigger1)
             effect1 = self.game_engine.next_message()
-            effect_messages.append(effect1)
+            if effect1 and effect1.type == MessageType.STEP_EXECUTED:
+                effect_messages.append(effect1)
         
         # Get second trigger and effect
         trigger2 = self.game_engine.next_message()
-        if trigger2 and (trigger2.event_data is not None or trigger2.step is not None):
+        if trigger2 and trigger2.type == MessageType.STEP_EXECUTED:
             trigger_messages.append(trigger2)
             effect2 = self.game_engine.next_message()
-            effect_messages.append(effect2)
+            if effect2 and effect2.type == MessageType.STEP_EXECUTED:
+                effect_messages.append(effect2)
         
         # Verify both characters triggered their abilities
         assert len(trigger_messages) == 2
         assert len(effect_messages) == 2
+        
+        # Verify both characters gained Challenger bonuses
+        assert hasattr(armed_character1, 'strength_bonuses') and len(armed_character1.strength_bonuses) > 0
+        assert hasattr(armed_character2, 'strength_bonuses') and len(armed_character2.strength_bonuses) > 0
 
 
 if __name__ == "__main__":

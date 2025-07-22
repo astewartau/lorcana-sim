@@ -37,11 +37,11 @@ class ComposableListener:
             'game_state': event_context.game_state,
             'player': event_context.player,
             'ability_name': self.name,
-            'ability_owner': event_context.source,
+            'ability_owner': event_context.source,  # Default fallback
             'action_queue': getattr(event_context, 'action_queue', None)
         }
         
-        # Add ability owner info if available
+        # Add ability owner info if available (this will override the fallback above)
         if hasattr(event_context, 'additional_data') and event_context.additional_data:
             context.update(event_context.additional_data)
         
@@ -66,7 +66,10 @@ class ComposableListener:
                     actual_effect=self.effect  # This is already a ChoiceGenerationEffect
                 )
             else:
-                # For non-choice effects, use the old pattern with TargetedEffect
+                # For non-choice effects, resolve targets immediately and set up TargetedEffect
+                targets = self.target_selector.select(context)
+                context['resolved_targets'] = targets  # Pre-resolve targets for TargetedEffect
+                
                 targeted_effect = TargetedEffect(
                     base_effect=self.effect,
                     ability_name=self.name

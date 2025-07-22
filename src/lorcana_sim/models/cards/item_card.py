@@ -17,9 +17,15 @@ class ItemCard(Card):
     def is_permanent(self) -> bool:
         """Check if item stays in play (vs single-use)."""
         # Determine from ability text - items with ongoing effects typically stay in play
-        for ability in self.abilities:
-            effect_text = ability.effect.lower()
-            # Look for indicators of permanent effects
+        if hasattr(self, 'abilities'):
+            for ability in self.abilities:
+                effect_text = ability.effect.lower()
+                # Look for indicators of permanent effects
+                if any(keyword in effect_text for keyword in ["while", "as long as", "whenever", "during"]):
+                    return True
+        elif self.full_text:
+            # Check full_text for permanent effect indicators
+            effect_text = self.full_text.lower()
             if any(keyword in effect_text for keyword in ["while", "as long as", "whenever", "during"]):
                 return True
         # Default to permanent for now
@@ -29,8 +35,14 @@ class ItemCard(Card):
     def is_attachment(self) -> bool:
         """Check if this item attaches to characters."""
         # Look for attachment indicators in ability text
-        for ability in self.abilities:
-            effect_text = ability.effect.lower()
+        if hasattr(self, 'abilities'):
+            for ability in self.abilities:
+                effect_text = ability.effect.lower()
+                if any(keyword in effect_text for keyword in ["attach", "equipped", "bearer"]):
+                    return True
+        elif self.full_text:
+            # Check full_text for attachment indicators
+            effect_text = self.full_text.lower()
             if any(keyword in effect_text for keyword in ["attach", "equipped", "bearer"]):
                 return True
         return False

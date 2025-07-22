@@ -56,18 +56,36 @@ class TestGraspingTrunkIntegration(GameEngineTestBase):
             lore=1
         )
         
-        # Set up game state
-        self.player1.characters_in_play = [trunk_character]
+        # Set up game state - put characters in hands BEFORE GameEngine init to register abilities
+        self.player1.hand = [trunk_character]
         self.player2.characters_in_play = [opponent_high_lore, opponent_low_lore]
+        self.setup_player_ink(self.player1, ink_count=5)  # Ensure player has ink to play character
         
-        # Make trunk character ready to quest
-        trunk_character.exerted = False
-        trunk_character.is_dry = True
+        # Set controllers
         trunk_character.controller = self.player1
-        
-        # Set opponent controllers
         opponent_high_lore.controller = self.player2
         opponent_low_lore.controller = self.player2
+        
+        # Play the trunk character to register abilities properly
+        play_move = PlayMove(trunk_character)
+        play_message = self.game_engine.next_message(play_move)
+        
+        # Verify the character was played
+        assert play_message.type == MessageType.STEP_EXECUTED
+        assert trunk_character in self.player1.characters_in_play
+        
+        # Process any enter-play triggers
+        enter_play_message = self.game_engine.next_message()
+        if enter_play_message.type == MessageType.STEP_EXECUTED:
+            # There was an enter-play trigger, process it
+            pass
+        else:
+            # No enter-play trigger, this is fine - put the message back by not consuming it
+            pass
+        
+        # Make trunk character ready to quest (should already be exerted from playing, make it ready)
+        trunk_character.exerted = False
+        trunk_character.is_dry = True
         
         # Record initial lore
         initial_player_lore = self.player1.lore
@@ -97,7 +115,8 @@ class TestGraspingTrunkIntegration(GameEngineTestBase):
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose the high lore opponent (assume index 0)
-        target_choice = ChoiceMove(choice_index=0)  # Choose first opponent
+        selected_option = choice_message.choice.options[0].id  # Choose first opponent
+        target_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(target_choice)
         
         # Get the effect message
@@ -128,16 +147,33 @@ class TestGraspingTrunkIntegration(GameEngineTestBase):
             lore=4
         )
         
-        # Set up game state
-        self.player1.characters_in_play = [trunk_character]
+        # Set up game state - put character in hand BEFORE GameEngine init to register abilities
+        self.player1.hand = [trunk_character]
         self.player2.characters_in_play = [zero_lore_opponent, high_lore_opponent]
+        self.setup_player_ink(self.player1, ink_count=5)  # Ensure player has ink
         
-        trunk_character.exerted = False
-        trunk_character.is_dry = True
+        # Set controllers
         trunk_character.controller = self.player1
-        
         zero_lore_opponent.controller = self.player2
         high_lore_opponent.controller = self.player2
+        
+        # Play the trunk character to register abilities properly
+        play_move = PlayMove(trunk_character)
+        play_message = self.game_engine.next_message(play_move)
+        
+        # Verify the character was played
+        assert play_message.type == MessageType.STEP_EXECUTED
+        assert trunk_character in self.player1.characters_in_play
+        
+        # Process any enter-play triggers
+        enter_play_message = self.game_engine.next_message()
+        if enter_play_message.type == MessageType.STEP_EXECUTED:
+            # There was an enter-play trigger, process it
+            pass
+        
+        # Make trunk character ready to quest
+        trunk_character.exerted = False
+        trunk_character.is_dry = True
         
         # Record initial lore
         initial_player_lore = self.player1.lore
@@ -158,7 +194,8 @@ class TestGraspingTrunkIntegration(GameEngineTestBase):
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose the high lore opponent
-        target_choice = ChoiceMove(choice_index=1)  # Assume second choice is high lore
+        selected_option = choice_message.choice.options[1].id  # Assume second choice is high lore
+        target_choice = ChoiceMove(choice_id=choice_message.choice.choice_id, option=selected_option)
         choice_result = self.game_engine.next_message(target_choice)
         
         # Get effect message
@@ -175,13 +212,30 @@ class TestGraspingTrunkIntegration(GameEngineTestBase):
             name="Trunk Character"
         )
         
-        # Set up game state with no opponents
-        self.player1.characters_in_play = [trunk_character]
+        # Set up game state with no opponents - put character in hand BEFORE GameEngine init
+        self.player1.hand = [trunk_character]
         self.player2.characters_in_play = []  # No opponents
+        self.setup_player_ink(self.player1, ink_count=5)
         
+        # Set controller
+        trunk_character.controller = self.player1
+        
+        # Play the trunk character to register abilities properly
+        play_move = PlayMove(trunk_character)
+        play_message = self.game_engine.next_message(play_move)
+        
+        # Verify the character was played
+        assert play_message.type == MessageType.STEP_EXECUTED
+        assert trunk_character in self.player1.characters_in_play
+        
+        # Process any enter-play triggers
+        enter_play_message = self.game_engine.next_message()
+        if enter_play_message.type == MessageType.STEP_EXECUTED:
+            pass
+        
+        # Make trunk character ready to quest
         trunk_character.exerted = False
         trunk_character.is_dry = True
-        trunk_character.controller = self.player1
         
         # Record initial lore
         initial_player_lore = self.player1.lore
@@ -220,19 +274,40 @@ class TestGraspingTrunkIntegration(GameEngineTestBase):
             lore=2
         )
         
-        # Set up game state
-        self.player1.characters_in_play = [trunk_character1, trunk_character2]
+        # Set up game state - put characters in hand BEFORE GameEngine init to register abilities
+        self.player1.hand = [trunk_character1, trunk_character2]
         self.player2.characters_in_play = [opponent]
+        self.setup_player_ink(self.player1, ink_count=10)  # Ensure player has ink for both characters
+        
+        # Set controllers
+        trunk_character1.controller = self.player1
+        trunk_character2.controller = self.player1
+        opponent.controller = self.player2
+        
+        # Play both characters to register abilities properly
+        play_move1 = PlayMove(trunk_character1)
+        play_message1 = self.game_engine.next_message(play_move1)
+        assert play_message1.type == MessageType.STEP_EXECUTED
+        
+        # Process any enter-play triggers for first character
+        enter_play_message1 = self.game_engine.next_message()
+        if enter_play_message1.type == MessageType.STEP_EXECUTED:
+            pass
+        
+        play_move2 = PlayMove(trunk_character2)
+        play_message2 = self.game_engine.next_message(play_move2)
+        assert play_message2.type == MessageType.STEP_EXECUTED
+        
+        # Process any enter-play triggers for second character
+        enter_play_message2 = self.game_engine.next_message()
+        if enter_play_message2.type == MessageType.STEP_EXECUTED:
+            pass
         
         # Make both characters ready to quest
         trunk_character1.exerted = False
         trunk_character1.is_dry = True
         trunk_character2.exerted = False
         trunk_character2.is_dry = True
-        
-        trunk_character1.controller = self.player1
-        trunk_character2.controller = self.player1
-        opponent.controller = self.player2
         
         # Record initial lore
         initial_lore = self.player1.lore
@@ -249,7 +324,8 @@ class TestGraspingTrunkIntegration(GameEngineTestBase):
         choice_message1 = self.game_engine.next_message()
         assert choice_message1.type == MessageType.CHOICE_REQUIRED
         
-        target_choice1 = ChoiceMove(choice_index=0)
+        selected_option1 = choice_message1.choice.options[0].id
+        target_choice1 = ChoiceMove(choice_id=choice_message1.choice.choice_id, option=selected_option1)
         choice_result1 = self.game_engine.next_message(target_choice1)
         
         effect_message1 = self.game_engine.next_message()
@@ -268,7 +344,8 @@ class TestGraspingTrunkIntegration(GameEngineTestBase):
         assert trigger_message2.event_data is not None or trigger_message2.step is not None
         
         choice_message2 = self.game_engine.next_message()
-        target_choice2 = ChoiceMove(choice_index=0)
+        selected_option2 = choice_message2.choice.options[0].id
+        target_choice2 = ChoiceMove(choice_id=choice_message2.choice.choice_id, option=selected_option2)
         choice_result2 = self.game_engine.next_message(target_choice2)
         
         effect_message2 = self.game_engine.next_message()

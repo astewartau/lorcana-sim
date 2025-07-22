@@ -216,6 +216,25 @@ class Player:
         self.ready_all_characters()
         self.reset_turn_state()
     
+    def sing_song(self, singer: 'CharacterCard', song: 'ActionCard') -> bool:
+        """Have a character sing a song (exert character, discard song)."""
+        # Validate that singer is ready and belongs to this player
+        if singer not in self.characters_in_play or singer.exerted:
+            return False
+            
+        # Validate that song is in hand
+        if song not in self.hand:
+            return False
+            
+        # Exert the singer
+        singer.exerted = True
+        
+        # Remove song from hand and put in discard
+        self.hand.remove(song)
+        self.discard_pile.append(song)
+        
+        return True
+    
     def return_to_hand(self, card: Card) -> bool:
         """Return a card from play to hand."""
         # Remove from characters in play

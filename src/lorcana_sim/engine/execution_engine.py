@@ -325,7 +325,9 @@ class ExecutionEngine:
                     source=character,
                     additional_data={
                         'character': character,
-                        'reason': 'willpower_depleted'
+                        'reason': 'willpower_depleted',
+                        'choice_manager': self.choice_manager,
+                        'action_queue': self.action_queue
                     }
                 )
                 

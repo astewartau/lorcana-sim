@@ -18,12 +18,20 @@ class GainLoreEqualToTargetLore(GainLoreEffect):
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
         """Apply the effect - gain lore equal to target's lore value."""
         # Get the target's lore value dynamically
-        lore_value = getattr(target, 'current_lore', 0)
+        lore_value = getattr(target, 'lore', 0)
         
         # Update our amount to the dynamic value
         self.amount = lore_value
         
-        # Use the parent class's apply method for standard lore gain logic
+        # The target is the selected character, but we need to gain lore for the ability owner
+        # Check if there's an ability_owner in context
+        if 'ability_owner' in context:
+            ability_owner = context['ability_owner']
+            if hasattr(ability_owner, 'controller'):
+                lore_gainer = ability_owner.controller
+                return super().apply(lore_gainer, context)
+        
+        # Fallback to original logic
         return super().apply(target, context)
 
 

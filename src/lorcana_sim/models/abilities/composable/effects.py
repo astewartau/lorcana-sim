@@ -204,7 +204,7 @@ class StatModification(Effect):
         # If target is None, this effect cannot be applied (no valid targets)
         if target is None:
             return None
-            
+        
         if hasattr(target, f'add_{self.stat}_bonus'):
             getattr(target, f'add_{self.stat}_bonus')(self.amount, self.duration)
         elif hasattr(target, f'modify_{self.stat}'):
@@ -217,6 +217,7 @@ class StatModification(Effect):
             # Direct modification as fallback
             current_value = getattr(target, self.stat, 0)
             setattr(target, self.stat, current_value + self.amount)
+        
         return target
     
     def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
@@ -626,7 +627,6 @@ class TargetedEffect(Effect):
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
         """Apply effect to pre-resolved targets only."""
         logger.debug("TargetedEffect.apply called for ability {self.ability_name}")
-        
         # This effect should ONLY be called when targets are already resolved
         targets = context.get('resolved_targets')
         
@@ -634,6 +634,9 @@ class TargetedEffect(Effect):
             raise ValueError(f"TargetedEffect for {self.ability_name} called without resolved targets")
         
         logger.debug("Using resolved targets: {targets}")
+        
+        # Note: choice_manager should always be present via event_context.additional_data
+        # If it's missing, that indicates a bug in the event emission logic
         
         # Apply base effect to all selected targets
         result = target
@@ -924,7 +927,9 @@ class PlayActionEffect(Effect):
         
         if player and hasattr(player, 'play_action'):
             self._player = player
-            player.play_action(self.card)
+            # Use the card's cost as the ink cost
+            ink_cost = getattr(self.card, 'cost', 0)
+            player.play_action(self.card, ink_cost)
         
         return target
     
@@ -2042,32 +2047,76 @@ class ResolveChoiceEffect(Effect):
             print(f"WARNING: Choice ID mismatch: expected {self.choice_id}, got {choice_manager.current_choice.choice_id}")
             return target
         
-        # Get the selected option's target
-        selected_target = None
+        # Get the selected option and its effect
+        selected_option = None
         for option in choice_manager.current_choice.options:
             if option.id == self.option:
-                selected_target = option.target
+                selected_option = option
                 break
         
-        if selected_target is None:
+        if selected_option is None:
             print(f"WARNING: Invalid option: {self.option}")
+            return target
+        
+        # Determine the target for the effect
+        # For options with explicit targets, use option.target
+        # For yes/no choices (PlayerChoice), use the original trigger target
+        selected_target = selected_option.target
+        if selected_target is None:
+            # Fall back to the original trigger target from context
+            selected_target = choice_manager.current_choice.trigger_context.get('_choice_target')
+        
+        if selected_target is None:
+            print(f"WARNING: No target found for option {self.option}")
             return target
         
         logger.debug("Selected target: {selected_target}")
         
-        # Get the action queue to resolve the waiting action
-        action_queue = context.get('action_queue')
-        if action_queue:
-            # Provide the selected targets to the waiting action
-            selected_targets = [selected_target] if selected_target else []
-            resumed_action_id = action_queue.resolve_choice_and_continue(self.choice_id, selected_targets)
-            logger.debug("Resumed action ID: {resumed_action_id}")
+        # Execute the selected option's effect
+        selected_effect = selected_option.effect
+        if selected_effect:
+            # Get the action queue to enqueue the selected effect
+            action_queue = context.get('action_queue')
+            if action_queue:
+                # Create execution context from the original trigger context
+                execution_context = choice_manager.current_choice.trigger_context.get('_choice_execution_context', {})
+                # Ensure we have the necessary context keys
+                execution_context.update({
+                    'game_state': context.get('game_state'),
+                    'action_queue': action_queue,
+                    'choice_manager': choice_manager
+                })
+                
+                # Enqueue the selected effect with high priority
+                from ....engine.action_queue import ActionPriority
+                action_id = action_queue.enqueue(
+                    effect=selected_effect,
+                    target=selected_target,
+                    context=execution_context,
+                    priority=ActionPriority.HIGH,
+                    source_description=f"Choice: {choice_manager.current_choice.ability_name} - {selected_option.description}"
+                )
+                logger.debug("Enqueued selected effect with action ID: {action_id}")
+            else:
+                print(f"WARNING: No action_queue found in context - executing effect directly")
+                # Fallback: execute directly (not recommended but better than nothing)
+                execution_context = choice_manager.current_choice.trigger_context.get('_choice_execution_context', context)
+                result = selected_effect.apply(selected_target, execution_context)
+                logger.debug("Executed effect directly, result: {result}")
         else:
-            print(f"WARNING: No action_queue found in context")
+            logger.debug("No effect to execute for selected option")
         
-        # Clear the current choice
-        choice_manager.current_choice = None
-        if hasattr(choice_manager, 'game_paused'):
+        # Properly clear the choice from the manager's pending list
+        if choice_manager.current_choice:
+            choice_to_remove = choice_manager.current_choice
+            if choice_to_remove in choice_manager.pending_choices:
+                choice_manager.pending_choices.remove(choice_to_remove)
+        
+        # Set next choice or clear if none remaining
+        choice_manager.current_choice = choice_manager.pending_choices[0] if choice_manager.pending_choices else None
+        
+        # Unpause if no more choices
+        if not choice_manager.pending_choices:
             choice_manager.game_paused = False
         
         return f"Choice resolved: {self.option}"
