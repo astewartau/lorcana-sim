@@ -18,6 +18,6 @@ def create_thats_better(character: Any, ability_data: dict):
             .choice_effect(
                 trigger_condition=when_enters_play(character),
                 target_selector=FRIENDLY_CHARACTER,
-                effect=ChallengerEffect(2),
+                effect=ChallengerEffect(2, "this_turn"),
                 name="THAT'S BETTER"
             ))

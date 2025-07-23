@@ -58,11 +58,9 @@ class ChoiceEngine:
         # Temporarily replace the method
         self.choice_manager.provide_choice = wrapped_provide_choice
         
-        try:
-            success = self.choice_manager.provide_choice(choice_id, option)
-        finally:
-            # Restore original method
-            self.choice_manager.provide_choice = original_provide_choice
+        success = self.choice_manager.provide_choice(choice_id, option)
+        # Restore original method
+        self.choice_manager.provide_choice = original_provide_choice
             
         if not success:
             raise ValueError(f"Failed to resolve choice {choice_id} with option {option}")

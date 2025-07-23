@@ -273,15 +273,12 @@ class CardDatabase:
             # Handle named abilities
             elif ability.get('name'):
                 ability_name = ability.get('name')
-                try:
-                    named_ability = NamedAbilityRegistry.create_ability(ability_name, character, ability)
-                    if named_ability:
-                        keyword_abilities.append(named_ability)
-                        print(f"Added named ability {ability_name} to {character.name}")
-                    else:
-                        print(f"Named ability {ability_name} not implemented yet for {character.name}")
-                except Exception as e:
-                    print(f"Warning: Failed to create named ability {ability_name} for {character.name}: {e}")
+                named_ability = NamedAbilityRegistry.create_ability(ability_name, character, ability)
+                if named_ability:
+                    keyword_abilities.append(named_ability)
+                    print(f"Added named ability {ability_name} to {character.name}")
+                else:
+                    print(f"Named ability {ability_name} not implemented yet for {character.name}")
             
             # Only process abilities with proper keyword field to avoid false positives
             # Effect text can contain phrases like "grants Evasive" which doesn't mean the card has Evasive

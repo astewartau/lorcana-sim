@@ -119,10 +119,7 @@ class TestDanceOffIntegration(GameEngineTestBase):
         assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Try one more message call in case there's another queued effect
-        try:
-            extra_message = self.game_engine.next_message()
-        except Exception as e:
-            pass  # No more messages available
+        extra_message = self.game_engine.next_message()
         
         # Verify lore was gained
         assert self.player1.lore == initial_lore + 1
@@ -148,9 +145,18 @@ class TestDanceOffIntegration(GameEngineTestBase):
             willpower=3
         )
         
-        # Set up game state
-        self.player1.characters_in_play = [dance_character, mickey_character]
-        self.player2.characters_in_play = [opponent_character]
+        # Set up game state using proper methodology
+        # Characters should be in hand before game engine initialization
+        self.player1.hand = [dance_character, mickey_character]
+        self.player2.hand = [opponent_character]
+        self.setup_player_ink(self.player1, ink_count=10)
+        self.setup_player_ink(self.player2, ink_count=10)
+        
+        # Play all characters
+        dance_message = self.game_engine.next_message(PlayMove(dance_character))
+        mickey_message = self.game_engine.next_message(PlayMove(mickey_character))
+        # Switch to player 2 to play opponent
+        # Note: This is a simplified approach; in practice, turn management is more complex
         
         # Make Mickey ready to challenge
         mickey_character.exerted = False
@@ -188,10 +194,7 @@ class TestDanceOffIntegration(GameEngineTestBase):
         assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Try one more message call in case there's another queued effect
-        try:
-            extra_message = self.game_engine.next_message()
-        except Exception as e:
-            pass  # No more messages available
+        extra_message = self.game_engine.next_message()
         
         # Verify lore was gained
         assert self.player1.lore == initial_lore + 1
@@ -268,9 +271,19 @@ class TestDanceOffIntegration(GameEngineTestBase):
         opponent1 = self.create_test_character(name="Opponent 1", willpower=2)
         opponent2 = self.create_test_character(name="Opponent 2", willpower=3)
         
-        # Set up game state
-        self.player1.characters_in_play = [dance_character, mickey1, mickey2]
-        self.player2.characters_in_play = [opponent1, opponent2]
+        # Set up game state using Phase 7 methodology
+        # Characters should be in hand before game engine operations
+        self.player1.hand = [dance_character, mickey1, mickey2]
+        self.player2.hand = [opponent1, opponent2]
+        self.setup_player_ink(self.player1, ink_count=10)
+        self.setup_player_ink(self.player2, ink_count=10)
+        
+        # Play all characters properly through the game engine
+        self.game_engine.next_message(PlayMove(dance_character))
+        self.game_engine.next_message(PlayMove(mickey1))
+        self.game_engine.next_message(PlayMove(mickey2))
+        self.game_engine.next_message(PlayMove(opponent1))
+        self.game_engine.next_message(PlayMove(opponent2))
         
         # Set up for challenges
         mickey1.exerted = False
@@ -282,11 +295,12 @@ class TestDanceOffIntegration(GameEngineTestBase):
         opponent2.exerted = True
         opponent2.is_dry = True
         
-        # Set controllers
-        for char in [dance_character, mickey1, mickey2]:
-            char.controller = self.player1
-        for char in [opponent1, opponent2]:
-            char.controller = self.player2
+        # Controllers are set automatically during PlayMove, but verify
+        dance_character.controller = self.player1
+        mickey1.controller = self.player1
+        mickey2.controller = self.player1
+        opponent1.controller = self.player2
+        opponent2.controller = self.player2
         
         # Record initial lore
         initial_lore = self.player1.lore
@@ -306,6 +320,11 @@ class TestDanceOffIntegration(GameEngineTestBase):
         effect_message1 = self.game_engine.next_message()
         # Verify effect message
         assert effect_message1.type == MessageType.STEP_EXECUTED
+        
+        # Process any additional queued effects from the action queue
+        # Process the actual lore gain effect (queued by AbilityTriggerEffect)
+        lore_gain_message = self.game_engine.next_message()
+        assert lore_gain_message.type == MessageType.STEP_EXECUTED
         
         # Verify lore increased by 1
         assert self.player1.lore == initial_lore + 1

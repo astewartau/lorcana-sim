@@ -96,74 +96,61 @@ class ConditionalEffect:
     
     def evaluate_condition(self, game_state: 'GameState') -> bool:
         """Evaluate whether the condition is currently met."""
-        try:
-            result = self.condition_func(game_state, self.source_card)
-            
-            # Update evaluation tracking
-            self.last_evaluation_turn = game_state.turn_number
-            self.last_evaluation_phase = game_state.current_phase.value
-            
-            return result
-        except Exception as e:
-            # Log error but don't crash the game
-            print(f"Error evaluating condition for {self.effect_id}: {e}")
-            return False
+        result = self.condition_func(game_state, self.source_card)
+        
+        # Update evaluation tracking
+        self.last_evaluation_turn = game_state.turn_number
+        self.last_evaluation_phase = game_state.current_phase.value
+        
+        return result
     
     def apply_effect(self, game_state: 'GameState') -> Optional[Dict[str, Any]]:
         """Apply the effect and return any events to queue."""
         if self.is_active:
             return None  # Already active
         
-        try:
-            result = self.effect_func(game_state, self.source_card)
-            self.is_active = True
-            
-            # Create application event
-            event = {
-                'type': 'CONDITIONAL_EFFECT_APPLIED',
-                'effect_id': self.effect_id,
-                'source': self.source_card.name,
-                'ability_name': self.ability_name,
-                'details': result,
-                'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0)
-            }
-            return event
-        except Exception as e:
-            print(f"Error applying effect {self.effect_id}: {e}")
-            return None
+        result = self.effect_func(game_state, self.source_card)
+        self.is_active = True
+        
+        # Create application event
+        event = {
+            'type': 'CONDITIONAL_EFFECT_APPLIED',
+            'effect_id': self.effect_id,
+            'source': self.source_card.name,
+            'ability_name': self.ability_name,
+            'details': result,
+            'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0)
+        }
+        return event
     
     def remove_effect(self, game_state: 'GameState') -> Optional[Dict[str, Any]]:
         """Remove the effect and return any events to queue."""
         if not self.is_active:
             return None  # Not active
         
-        try:
-            removal_details = None
-            if self.removal_func:
-                # Check if removal_func returns details (new pattern) or None (old pattern)
-                result = self.removal_func(game_state, self.source_card)
-                if isinstance(result, dict):
-                    removal_details = result
-            
-            self.is_active = False
-            
-            # Create removal event
-            removal_event = {
-                'type': 'CONDITIONAL_EFFECT_REMOVED',
-                'effect_id': self.effect_id,
-                'source': self.source_card.name,
-                'ability_name': self.ability_name,
-                'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0)
-            }
-            
-            # Include removal details if provided
-            if removal_details:
-                removal_event.update(removal_details)
-            
-            return removal_event
-        except Exception as e:
-            print(f"Error removing effect {self.effect_id}: {e}")
-            return None
+        removal_details = None
+        if self.removal_func:
+            # Check if removal_func returns details (new pattern) or None (old pattern)
+            result = self.removal_func(game_state, self.source_card)
+            if isinstance(result, dict):
+                removal_details = result
+        
+        self.is_active = False
+        
+        # Create removal event
+        removal_event = {
+            'type': 'CONDITIONAL_EFFECT_REMOVED',
+            'effect_id': self.effect_id,
+            'source': self.source_card.name,
+            'ability_name': self.ability_name,
+            'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0)
+        }
+        
+        # Include removal details if provided
+        if removal_details:
+            removal_event.update(removal_details)
+        
+        return removal_event
     
     def is_in_valid_zone(self, game_state: 'GameState') -> bool:
         """Check if the source card is in a valid activation zone."""

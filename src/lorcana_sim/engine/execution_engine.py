@@ -247,22 +247,19 @@ class ExecutionEngine:
             return ActionResult.failure_result(action, message)
         
         # Execute the action using the ActionExecutor
-        try:
-            # Adjust parameters for ActionExecutor format
-            if action == "sing_song":
-                # ActionExecutor expects 'character' and 'song' keys
-                adjusted_params = {
-                    'character': parameters.get('singer'),
-                    'song': parameters.get('song')
-                }
-                result = self.action_executor.execute_action(action, adjusted_params)
-            else:
-                result = self.action_executor.execute_action(action, parameters)
-            
-            return result
+        # Adjust parameters for ActionExecutor format
+        if action == "sing_song":
+            # ActionExecutor expects 'character' and 'song' keys
+            adjusted_params = {
+                'character': parameters.get('singer'),
+                'song': parameters.get('song')
+            }
+            result = self.action_executor.execute_action(action, adjusted_params)
+        else:
+            result = self.action_executor.execute_action(action, parameters)
         
-        except Exception as e:
-            return ActionResult.failure_result(action, f"Error executing action: {str(e)}")
+        return result
+        
     
     # NOTE: _convert_to_action_move REMOVED in Phase 4
     
@@ -377,24 +374,17 @@ class ExecutionEngine:
         from .action_result import ActionResult
         # NOTE: GameAction import removed in Phase 4
         
-        try:
-            success = self.choice_manager.provide_choice(choice_id, option)
-            if success:
-                return ActionResult.success_result("progress", {})
-            else:
-                return ActionResult.failure_result("progress", f"Failed to resolve choice {choice_id}")
-        except Exception as e:
-            return ActionResult.failure_result("progress", f"Error resolving choice: {str(e)}")
+        success = self.choice_manager.provide_choice(choice_id, option)
+        if success:
+            return ActionResult.success_result("progress", {})
+        else:
+            return ActionResult.failure_result("progress", f"Failed to resolve choice {choice_id}")
     
     
     @property
     def condition_evaluator(self):
         """Lazy initialization of condition evaluator."""
         if self._condition_evaluator is None:
-            try:
-                from ..models.abilities.composable.condition_evaluator import ConditionEvaluator
-                self._condition_evaluator = ConditionEvaluator()
-            except ImportError:
-                # Handle case where condition evaluator is not available
-                pass
+            from ..models.abilities.composable.condition_evaluator import ConditionEvaluator
+            self._condition_evaluator = ConditionEvaluator()
         return self._condition_evaluator

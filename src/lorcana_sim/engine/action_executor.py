@@ -183,7 +183,7 @@ class ActionExecutor:
         
         # Action effects would be resolved here based on the specific card
         # For now, we'll add it to discard
-        player.discard.append(card)
+        player.discard_pile.append(card)
         
         # Record the action
         self.game_state.record_action("play_action")
@@ -402,7 +402,7 @@ class ActionExecutor:
         
         # Song effects would be resolved here
         # For now, add to discard
-        player.discard.append(song)
+        player.discard_pile.append(song)
         
         # Record the action
         self.game_state.record_action("sing_song")

@@ -43,20 +43,16 @@ def test_load_real_card_database(card_database):
     
     # Test first 50 cards to avoid long test times
     for card_data in card_database[:50]:
-        try:
-            card = CardFactory.from_json(card_data)
-            cards_created += 1
+        card = CardFactory.from_json(card_data)
+        cards_created += 1
+        
+        # Basic validation
+        assert card.id > 0
+        assert card.name
+        assert card.cost >= 0
+        assert card.color
+        assert card.rarity
             
-            # Basic validation
-            assert card.id > 0
-            assert card.name
-            assert card.cost >= 0
-            assert card.color
-            assert card.rarity
-            
-        except Exception as e:
-            errors += 1
-            assert False, f"Failed to create card {card_data.get('fullName', 'Unknown')}: {e}"
     
     assert cards_created > 0, "Should have successfully created some cards"
     assert errors < cards_created, "Should have more successes than failures"
@@ -71,22 +67,19 @@ def test_card_type_distribution(card_database):
     for card_data in card_database[:100]:  # Test first 100 cards
         card_type = card_data.get("type")
         if card_type in type_counts:
-            try:
-                card = CardFactory.from_json(card_data)
-                type_counts[card_type] += 1
-                
-                # Verify card type matches class
-                if card_type == "Character":
-                    assert isinstance(card, CharacterCard)
-                elif card_type == "Action":
-                    assert isinstance(card, ActionCard)
-                elif card_type == "Item":
-                    assert isinstance(card, ItemCard)
-                elif card_type == "Location":
-                    assert isinstance(card, LocationCard)
+            card = CardFactory.from_json(card_data)
+            type_counts[card_type] += 1
+            
+            # Verify card type matches class
+            if card_type == "Character":
+                assert isinstance(card, CharacterCard)
+            elif card_type == "Action":
+                assert isinstance(card, ActionCard)
+            elif card_type == "Item":
+                assert isinstance(card, ItemCard)
+            elif card_type == "Location":
+                assert isinstance(card, LocationCard)
                     
-            except Exception as e:
-                assert False, f"Error processing card {card_data.get('fullName', 'Unknown')}: {e}"
     
     assert sum(type_counts.values()) > 0, "Should have processed some cards"
     assert sum(type_counts.values()) > 0
@@ -97,22 +90,19 @@ def test_character_cards_have_combat_stats(card_database):
     character_cards = [card for card in card_database if card.get("type") == "Character"]
     
     for card_data in character_cards[:20]:  # Test first 20 characters
-        try:
-            card = CardFactory.from_json(card_data)
-            assert isinstance(card, CharacterCard)
+        card = CardFactory.from_json(card_data)
+        assert isinstance(card, CharacterCard)
+        
+        # Character cards should have combat stats
+        assert card.strength >= 0
+        assert card.willpower > 0  # Characters must have at least 1 willpower
+        assert card.lore >= 0
+        
+        # Should be able to perform character actions
+        assert card.can_quest(1) is True  # Initially ready
+        assert card.can_challenge(1) is True  # Initially ready
+        assert card.is_alive is True  # No initial damage
             
-            # Character cards should have combat stats
-            assert card.strength >= 0
-            assert card.willpower > 0  # Characters must have at least 1 willpower
-            assert card.lore >= 0
-            
-            # Should be able to perform character actions
-            assert card.can_quest(1) is True  # Initially ready
-            assert card.can_challenge(1) is True  # Initially ready
-            assert card.is_alive is True  # No initial damage
-            
-        except Exception as e:
-                assert False, f"Error with character {card_data.get('fullName', 'Unknown')}: {e}"
 
 
 def test_dreamborn_deck_loading():
@@ -126,22 +116,19 @@ def test_dreamborn_deck_loading():
     card_database = parser.cards
     
     # Load deck
-    try:
-        deck = Deck.from_dreamborn(str(deck_path), card_database, "Test Deck")
+    deck = Deck.from_dreamborn(str(deck_path), card_database, "Test Deck")
+    
+    assert deck.name == "Test Deck"
+    assert deck.total_cards > 0
+    assert deck.unique_cards > 0
+    
+    # Deck should be close to legal (60 cards)
+    legal, errors = deck.is_legal()
+    # Verify deck properties
+    assert deck.total_cards > 0, "Deck should have cards"
+    summary = deck.get_summary()
+    assert summary is not None, "Deck should have a summary"
         
-        assert deck.name == "Test Deck"
-        assert deck.total_cards > 0
-        assert deck.unique_cards > 0
-        
-        # Deck should be close to legal (60 cards)
-        legal, errors = deck.is_legal()
-        # Verify deck properties
-        assert deck.total_cards > 0, "Deck should have cards"
-        summary = deck.get_summary()
-        assert summary is not None, "Deck should have a summary"
-        
-    except Exception as e:
-        raise Exception(f"Could not load Dreamborn deck: {e}") from e
 
 
 def test_create_simple_game(sample_cards):
@@ -205,11 +192,8 @@ def _create_random_legal_deck(card_database, deck_name="Random Deck", max_attemp
     # Create cards from database
     all_cards = []
     for card_data in card_database:
-        try:
-            card = CardFactory.from_json(card_data)
-            all_cards.append(card)
-        except Exception:
-            continue
+        card = CardFactory.from_json(card_data)
+        all_cards.append(card)
     
     if len(all_cards) < 15:
         return None
@@ -236,11 +220,8 @@ def _create_realistic_deck(card_database, primary_colors, deck_name="Realistic D
     # Organize cards by color and cost
     cards_by_color = defaultdict(list)
     for card_data in card_database:
-        try:
-            card = CardFactory.from_json(card_data)
-            cards_by_color[card.color].append(card)
-        except Exception:
-            continue
+        card = CardFactory.from_json(card_data)
+        cards_by_color[card.color].append(card)
     
     # Check if we have enough cards in the primary colors
     available_cards = []
@@ -368,11 +349,8 @@ def test_deck_building_edge_cases(card_database):
     # Get some valid cards
     valid_cards = []
     for card_data in card_database[:50]:  # Test with first 50 to keep it fast
-        try:
-            card = CardFactory.from_json(card_data)
-            valid_cards.append(card)
-        except Exception:
-            continue
+        card = CardFactory.from_json(card_data)
+        valid_cards.append(card)
     
     assert len(valid_cards) >= 5, "Not enough valid cards for edge case testing"
     

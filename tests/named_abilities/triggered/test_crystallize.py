@@ -161,15 +161,23 @@ class TestCrystallizeIntegration(GameEngineTestBase):
         other_char = self.create_test_character("Other Character")
         opponent_char = self.create_test_character("Enemy Character")
         
-        # Put crystallize character and opponent in play first
-        self.play_character(crystallize_char, self.player1)
-        self.play_character(opponent_char, self.player2)
+        # Phase 7 methodology: Place characters in hand before GameEngine init
+        self.player1.hand = [other_char]
+        self.player1.characters_in_play = [crystallize_char]  # Crystallize character already in play
+        self.player2.characters_in_play = [opponent_char]     # Opponent character already in play
+        self.setup_player_ink(self.player1, ink_count=5)
+        
+        # Set up controllers
+        crystallize_char.controller = self.player1
+        other_char.controller = self.player1
+        opponent_char.controller = self.player2
         
         # Verify opponent is not exerted initially
         self.assert_character_exerted(opponent_char, False)
         
-        # Other character enters play (should NOT trigger CRYSTALLIZE)
-        message = self.play_character(other_char, self.player1)
+        # Other character enters play (should NOT trigger CRYSTALLIZE since it's not the crystallize char)
+        play_move = PlayMove(other_char)
+        message = self.game_engine.next_message(play_move)
         
         # Should successfully enter play
         self.assert_message_type(message, MessageType.STEP_EXECUTED)

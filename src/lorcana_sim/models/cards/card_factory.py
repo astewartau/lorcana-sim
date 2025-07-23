@@ -41,17 +41,19 @@ class CardFactory:
         # Handle color - could be single color or multi-color like "Amber-Steel"
         color_str = card_data.get("color", "")
         if not color_str:
-            raise ValueError(f"Card has empty color field: {card_data.get('fullName', 'Unknown')}")
+            # Some cards may have missing color data, provide a default
+            color_str = "Amber"
+        
+        # Handle multi-color cards by taking the first color
+        if "-" in color_str:
+            primary_color_str = color_str.split("-")[0]
+        else:
+            primary_color_str = color_str
         
         try:
-            color = CardColor(color_str)
+            color = CardColor(primary_color_str)
         except ValueError:
-            # Handle multi-color cards by taking the first color for now
-            if "-" in color_str:
-                first_color = color_str.split("-")[0]
-                color = CardColor(first_color)
-            else:
-                raise ValueError(f"Unknown card color: {color_str}")
+            raise ValueError(f"Unknown card color: {color_str}")
         
         return {
             "id": card_data["id"],

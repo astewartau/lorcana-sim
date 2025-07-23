@@ -317,24 +317,17 @@ class GameEngine:
         step = self.current_steps.popleft()
         
         # Execute the step
-        try:
-            result = step.execute_fn()
-            
-            # Create a message based on the result
-            if hasattr(result, 'success') and result.success:
-                self._queue_result_message(result)
-                return StepExecutedMessage(
-                    type=MessageType.STEP_EXECUTED,
-                    player=self.game_state.current_player,
-                    step=step.step_id
-                )
-            else:
-                return StepExecutedMessage(
-                    type=MessageType.STEP_EXECUTED,
-                    player=self.game_state.current_player,
-                    step=f"{step.step_id}_error"
-                )
-        except Exception as e:
+        result = step.execute_fn()
+        
+        # Create a message based on the result
+        if hasattr(result, 'success') and result.success:
+            self._queue_result_message(result)
+            return StepExecutedMessage(
+                type=MessageType.STEP_EXECUTED,
+                player=self.game_state.current_player,
+                step=step.step_id
+            )
+        else:
             return StepExecutedMessage(
                 type=MessageType.STEP_EXECUTED,
                 player=self.game_state.current_player,
@@ -523,11 +516,9 @@ class GameEngine:
         # Temporarily replace the method
         self.choice_manager.provide_choice = wrapped_provide_choice
         
-        try:
-            success = self.provide_player_choice(choice_id, option)
-        finally:
-            # Restore original method
-            self.choice_manager.provide_choice = original_provide_choice
+        success = self.provide_player_choice(choice_id, option)
+        # Restore original method
+        self.choice_manager.provide_choice = original_provide_choice
             
         if not success:
             raise ValueError(f"Failed to resolve choice {choice_id} with option {option}")

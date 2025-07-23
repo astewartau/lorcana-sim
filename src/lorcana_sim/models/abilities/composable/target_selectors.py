@@ -144,19 +144,15 @@ class CharacterSelector(TargetSelector):
             # Create a special effect that stores the selected target in the context
             from ....models.abilities.composable.effects import StoreTargetEffect
             
-            try:
-                controller_name = target.controller.name if hasattr(target, 'controller') and target.controller else 'Unknown'
-                option = ChoiceOption(
-                    id=f"target_{i}",
-                    description=f"{target.name} ({controller_name})",
-                    effect=StoreTargetEffect(target),  # Store the selected target
-                    target=target,      # Store target for later use
-                    data={'character': target}
-                )
-                logger.debug("Created choice option {i}: {option.description}")
-            except Exception as e:
-                logger.debug("Error creating choice option for {target}: {e}")
-                raise
+            controller_name = target.controller.name if hasattr(target, 'controller') and target.controller else 'Unknown'
+            option = ChoiceOption(
+                id=f"target_{i}",
+                description=f"{target.name} ({controller_name})",
+                effect=StoreTargetEffect(target),  # Store the selected target
+                target=target,      # Store target for later use
+                data={'character': target}
+            )
+            logger.debug("Created choice option {i}: {option.description}")
             options.append(option)
         
         # Add "none" option if selection is optional ("may" effects)
@@ -574,7 +570,141 @@ class TargetWithCostConstraintSelector(TargetSelector):
         valid_targets = [target for target in all_targets 
                         if self.cost_constraint(target)]
         
+        # Check if choice is needed
+        if self.requires_choice(valid_targets, context):
+            choice_manager = context.get('choice_manager')
+            if choice_manager:
+                # Generate choice for ALL valid targets
+                choice = self.create_target_choice(valid_targets, context)
+                choice_manager.queue_choice(choice, valid_targets, context)
+                
+                # Return None to signal choice pending
+                return None
+        
+        # Auto-select when no choice needed or no choice manager available
         return valid_targets[:self.count]
+    
+    def requires_choice(self, valid_targets: List[Any], context: Dict[str, Any]) -> bool:
+        """Determine if player choice is needed."""
+        # Choice needed when more targets available than can be selected
+        # and it's not a "select all" scenario
+        return (len(valid_targets) > self.count and 
+                self.count < 999 and  # 999 = "all"
+                self.count > 0)       # 0 = "none"
+    
+    def create_target_choice(self, valid_targets: List[Any], 
+                           context: Dict[str, Any]):
+        """Create a Choice object for target selection."""
+        from ....engine.choice_system import ChoiceContext, ChoiceOption, ChoiceType
+        from ....models.abilities.composable.effects import StoreTargetEffect
+        
+        # Get choice manager to generate choice ID
+        choice_manager = context.get('choice_manager')
+        if not choice_manager:
+            return None
+        
+        # Create options from valid targets
+        options = []
+        for i, target in enumerate(valid_targets):
+            controller_name = getattr(target.controller, 'name', 'Unknown') if hasattr(target, 'controller') else 'Unknown'
+            target_name = getattr(target, 'name', str(target))
+            option = ChoiceOption(
+                id=f"target_{i}",
+                description=f"{target_name} ({controller_name})",
+                effect=StoreTargetEffect(target),  # Store the selected target
+                target=target,      # Store target for later use
+                data={'target': target}
+            )
+            options.append(option)
+        
+        # Add "none" option if selection is optional ("may" effects)
+        is_optional = context.get('optional', True)
+        if is_optional:
+            options.append(ChoiceOption(
+                id="none",
+                description="Choose no target",
+                effect=StoreTargetEffect(None),  # Store None as the selected target
+                target=None,
+                data={}
+            ))
+        
+        # Get ability info for the choice prompt
+        ability_name = context.get('ability_name', 'Unknown Ability')
+        ability_owner = context.get('ability_owner')
+        player = ability_owner.controller if ability_owner else context.get('player')
+        
+        return ChoiceContext(
+            choice_id=choice_manager.generate_choice_id(),
+            player=player,
+            ability_name=ability_name,
+            prompt=self.get_choice_prompt(context),
+            choice_type=ChoiceType.SELECT_TARGETS,
+            options=options,
+            trigger_context=context,
+            timeout_seconds=None,
+            default_option="none" if is_optional else None
+        )
+    
+    def get_choice_prompt(self, context: Dict[str, Any]) -> str:
+        """Generate a user-friendly prompt for target selection."""
+        ability_name = context.get('ability_name', 'ability')
+        
+        if self.count == 1:
+            if 'item' in self.valid_types:
+                return f"Select target item for {ability_name}"
+            elif 'character' in self.valid_types:
+                return f"Select target character for {ability_name}"
+            elif 'location' in self.valid_types:
+                return f"Select target location for {ability_name}"
+            else:
+                return f"Select target for {ability_name}"
+        else:
+            return f"Select up to {self.count} targets for {ability_name}"
+    
+    def get_choice_options(self, context: Dict[str, Any]) -> List[Any]:
+        """Get choice options for target selection, bypassing the choice queue logic."""
+        game_state = context.get('game_state')
+        if not game_state:
+            event_context = context.get('event_context')
+            if event_context:
+                game_state = event_context.game_state
+        
+        if not game_state:
+            return []
+        
+        # Get all valid targets from all players
+        all_targets = []
+        if hasattr(game_state, 'players'):
+            for player in game_state.players:
+                if 'character' in self.valid_types and hasattr(player, 'characters_in_play'):
+                    all_targets.extend(player.characters_in_play)
+                if 'item' in self.valid_types and hasattr(player, 'items_in_play'):
+                    all_targets.extend(player.items_in_play)
+                if 'location' in self.valid_types and hasattr(player, 'locations_in_play'):
+                    all_targets.extend(player.locations_in_play)
+        
+        # Apply cost constraint
+        valid_targets = [target for target in all_targets 
+                        if self.cost_constraint(target)]
+        
+        if not valid_targets:
+            return []
+        
+        # Convert targets to choice options for ALL valid targets (not limited by count)
+        from ....engine.choice_system import ChoiceOption
+        
+        choice_options = []
+        for i, target in enumerate(valid_targets):
+            controller_name = getattr(target.controller, 'name', 'Unknown') if hasattr(target, 'controller') else 'Unknown'
+            target_name = getattr(target, 'name', str(target))
+            choice_options.append(ChoiceOption(
+                id=f"target_{i}",
+                description=f"{target_name} ({controller_name})",
+                target=target,
+                effect=None  # No effect needed for target selection
+            ))
+        
+        return choice_options
 
 
 def TARGET_WITH_COST_CONSTRAINT(cost_constraint: Callable[[Any], bool], valid_types: List[str] = None):

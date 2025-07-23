@@ -36,10 +36,7 @@ class ActionCard(Card):
                 words = effect_text.split()
                 for i, word in enumerate(words):
                     if word == "cost" and i + 1 < len(words):
-                        try:
-                            return int(words[i + 1])
-                        except ValueError:
-                            continue
+                        return int(words[i + 1])
         return None
     
     def can_be_sung_by_character(self, character_strength: int) -> bool:

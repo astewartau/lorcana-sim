@@ -1,7 +1,7 @@
 """Event system for triggered abilities and game state changes."""
 
 from enum import Enum
-from typing import Dict, Any, List, TYPE_CHECKING, Optional, Callable
+from typing import Dict, Any, List, Set, TYPE_CHECKING, Optional, Callable
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
@@ -26,8 +26,6 @@ def get_card_current_zone(card: Any, game_state: 'GameState') -> Optional['Activ
         elif card in player.deck:
             return ActivationZone.DECK
         elif hasattr(player, 'discard_pile') and card in player.discard_pile:
-            return ActivationZone.DISCARD
-        elif hasattr(player, 'discard') and card in player.discard:
             return ActivationZone.DISCARD
         elif card in player.inkwell:
             return ActivationZone.INK_WELL
@@ -145,12 +143,17 @@ class GameEventManager:
     def __init__(self, game_state: 'GameState'):
         self.game_state = game_state
         self._composable_listeners: Dict[GameEvent, List[Any]] = {}  # For composable abilities
+        self._registered_abilities: Set[Any] = set()  # Track registered abilities to prevent duplicates
         # NOTE: step_engine removed in Phase 4
         self.event_interceptors: List[Callable[[EventContext], bool]] = []
         self._paused_events: List[EventContext] = []
     
     def register_composable_ability(self, ability: Any) -> None:
         """Register a composable ability with the event manager."""
+        
+        # Prevent duplicate registration of the same ability instance
+        if ability in self._registered_abilities:
+            return
         
         # For composable abilities, get events from the ability's listeners
         if hasattr(ability, 'listeners'):
@@ -176,9 +179,19 @@ class GameEventManager:
             if event not in self._composable_listeners:
                 self._composable_listeners[event] = []
             self._composable_listeners[event].append(ability)
+        
+        # Mark ability as registered to prevent future duplicates
+        self._registered_abilities.add(ability)
     
-    def register_all_abilities(self) -> None:
-        """Register all abilities from all cards in the game at initialization."""
+    def register_all_abilities(self, clear_existing: bool = False) -> None:
+        """Register all abilities from all cards in the game at initialization.
+        
+        Args:
+            clear_existing: If True, clear all existing registrations first.
+        """
+        if clear_existing:
+            self.clear_all_registrations()
+        
         total_abilities_registered = 0
         
         for player in self.game_state.players:
@@ -189,8 +202,6 @@ class GameEventManager:
             all_cards.extend(player.characters_in_play)
             if hasattr(player, 'discard_pile'):
                 all_cards.extend(player.discard_pile)
-            elif hasattr(player, 'discard'):
-                all_cards.extend(player.discard)
             all_cards.extend(player.inkwell)
             
             for card in all_cards:
@@ -210,6 +221,14 @@ class GameEventManager:
         for event_list in self._composable_listeners.values():
             if ability in event_list:
                 event_list.remove(ability)
+        
+        # Remove from registered tracking set
+        self._registered_abilities.discard(ability)
+    
+    def clear_all_registrations(self) -> None:
+        """Clear all ability registrations. Useful for rebuilding the system."""
+        self._composable_listeners.clear()
+        self._registered_abilities.clear()
 
     def set_step_engine(self, step_engine) -> None:
         """DEPRECATED: Step engine removed in Phase 4."""
@@ -233,15 +252,11 @@ class GameEventManager:
         
         # Check interceptors first - they can pause/modify event processing
         for interceptor in self.event_interceptors:
-            try:
-                should_continue = interceptor(event_context)
-                if not should_continue:
-                    # Event was intercepted and should be paused
-                    self._paused_events.append(event_context)
-                    return [f"Event {event_context.event_type.value} intercepted and paused"]
-            except Exception as e:
-                # Interceptor error - log but continue
-                pass
+            should_continue = interceptor(event_context)
+            if not should_continue:
+                # Event was intercepted and should be paused
+                self._paused_events.append(event_context)
+                return [f"Event {event_context.event_type.value} intercepted and paused"]
         
         return self._execute_event(event_context)
     
@@ -322,12 +337,9 @@ class GameEventManager:
             return results
         
         for passive_ability in self.passive_abilities:
-            try:
-                change_message = passive_ability.evaluate_condition(self.game_state)
-                if change_message:
-                    results.append(change_message)
-            except Exception as e:
-                results.append(f"Error evaluating passive ability {passive_ability}: {str(e)}")
+            change_message = passive_ability.evaluate_condition(self.game_state)
+            if change_message:
+                results.append(change_message)
         
         return results
     

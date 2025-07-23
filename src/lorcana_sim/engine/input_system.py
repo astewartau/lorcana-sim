@@ -168,39 +168,36 @@ class InputManager:
         
         input_request = step.player_input
         
-        try:
-            if input_request.input_type == StepType.CHOICE:
-                result = provider.get_choice(
-                    input_request.prompt, 
-                    input_request.options, 
-                    input_request.constraints
-                )
-            elif input_request.input_type == StepType.SELECTION:
-                min_count = input_request.constraints.get('min_count', 1)
-                max_count = input_request.constraints.get('max_count', 1)
-                result = provider.get_selection(
-                    input_request.prompt,
-                    input_request.options,
-                    min_count,
-                    max_count,
-                    input_request.constraints
-                )
-            elif input_request.input_type == StepType.CONFIRMATION:
-                default = input_request.constraints.get('default', False)
-                result = provider.get_confirmation(input_request.prompt, default)
-            else:
-                raise ValueError(f"Unsupported input type: {input_request.input_type}")
+        if input_request.input_type == StepType.CHOICE:
+            result = provider.get_choice(
+                input_request.prompt, 
+                input_request.options, 
+                input_request.constraints
+            )
+        elif input_request.input_type == StepType.SELECTION:
+            min_count = input_request.constraints.get('min_count', 1)
+            max_count = input_request.constraints.get('max_count', 1)
+            result = provider.get_selection(
+                input_request.prompt,
+                input_request.options,
+                min_count,
+                max_count,
+                input_request.constraints
+            )
+        elif input_request.input_type == StepType.CONFIRMATION:
+            default = input_request.constraints.get('default', False)
+            result = provider.get_confirmation(input_request.prompt, default)
+        else:
+            raise ValueError(f"Unsupported input type: {input_request.input_type}")
+        
+        # Validate the input
+        if input_request.input_type in self.input_validators:
+            validator = self.input_validators[input_request.input_type]
+            if not validator(result, input_request):
+                raise InputValidationError(f"Input validation failed for {result}")
+        
+        return result
             
-            # Validate the input
-            if input_request.input_type in self.input_validators:
-                validator = self.input_validators[input_request.input_type]
-                if not validator(result, input_request):
-                    raise InputValidationError(f"Input validation failed for {result}")
-            
-            return result
-            
-        except Exception as e:
-            raise InputValidationError(f"Failed to get input: {str(e)}")
 
 
 class AbilityInputBuilder:

@@ -205,6 +205,12 @@ class TestMusicalDebutIntegration(GameEngineTestBase):
         # Put musical debut character in play first
         self.put_character_in_play(musical_debut_char, self.player1)
         
+        # Process any queued MUSICAL DEBUT effects from Ariel's entry
+        while True:
+            extra_message = self.game_engine.next_message()
+            if extra_message.type == MessageType.ACTION_REQUIRED:
+                break  # Stop when we need player action
+        
         # Track deck state before playing other character
         deck_state_before = len(self.player1.deck)
         hand_state_before = len(self.player1.hand)

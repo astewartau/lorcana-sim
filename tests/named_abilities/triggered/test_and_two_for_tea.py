@@ -163,8 +163,7 @@ class TestAndTwoForTeaIntegration(GameEngineTestBase):
         assert ability.name == "AND TWO FOR TEA!", "Ability should have correct name"
         assert len(ability.listeners) > 0, "Ability should have listeners"
         
-        # For this test, we'll verify the ability would target the right characters
-        # by manually checking the target selector
+        # Verify the ability configuration for multi-choice architecture
         from lorcana_sim.engine.event_system import EventContext, GameEvent
         
         # Create a mock event context to test targeting
@@ -175,7 +174,7 @@ class TestAndTwoForTeaIntegration(GameEngineTestBase):
             player=self.player1
         )
         
-        # Test the target selector
+        # Test the target selector (should target the tea character itself in new architecture)
         target_selector = ability.listeners[0].target_selector
         context = {
             'event_context': event_context,
@@ -186,14 +185,10 @@ class TestAndTwoForTeaIntegration(GameEngineTestBase):
         targets = target_selector.select(context)
         print(f"Target selector found: {[t.name for t in targets]}")
         
-        # Should find the Musketeer characters
-        musketeer_targets = [t for t in targets if 'Musketeer' in getattr(t, 'subtypes', [])]
-        print(f"Musketeer targets: {[t.name for t in musketeer_targets]}")
-        
-        # Verify correct targeting
-        assert len(musketeer_targets) == 2, f"Should find 2 Musketeers, found {len(musketeer_targets)}"
-        assert musketeer1 in musketeer_targets, "Should target Musketeer 1"
-        assert musketeer2 in musketeer_targets, "Should target Musketeer 2"
+        # In the new multi-choice architecture, the trigger targets the tea character itself
+        # The effect then finds and queues choices for each damaged Musketeer
+        assert len(targets) == 1, f"Should find 1 target (the tea character), found {len(targets)}"
+        assert tea_character in targets, "Should target the tea character itself"
         assert non_musketeer not in targets, "Should not target non-Musketeer"
         
         print("✅ AND TWO FOR TEA! ability configuration verified correctly!")
@@ -290,7 +285,8 @@ class TestAndTwoForTeaIntegration(GameEngineTestBase):
         musketeer_heavy_damage = self.create_test_character(
             name="Heavily Damaged Musketeer",
             subtypes=["Musketeer"],
-            damage=3  # More than 2 damage
+            willpower=5,  # High enough to survive 3 damage
+            damage=3      # More than 2 damage, but survivable
         )
         musketeer_light_damage = self.create_test_character(
             name="Lightly Damaged Musketeer",
@@ -303,12 +299,16 @@ class TestAndTwoForTeaIntegration(GameEngineTestBase):
             damage=0  # No damage
         )
         
-        # Set up game state
+        # Phase 7 methodology: Set up game state BEFORE GameEngine operations
         self.player1.hand = [tea_character]
         self.player1.characters_in_play = [musketeer_heavy_damage, musketeer_light_damage, musketeer_no_damage]
-        # Give player enough ink
-        ink_card = self.create_test_character(name="Ink", cost=1)
-        self.player1.inkwell = [ink_card, ink_card, ink_card, ink_card, ink_card]
+        self.setup_player_ink(self.player1, ink_count=5)
+        
+        # Set up controllers properly
+        tea_character.controller = self.player1
+        musketeer_heavy_damage.controller = self.player1
+        musketeer_light_damage.controller = self.player1
+        musketeer_no_damage.controller = self.player1
         
         # Play the tea character
         play_move = PlayMove(tea_character)
@@ -321,18 +321,43 @@ class TestAndTwoForTeaIntegration(GameEngineTestBase):
         # Get the ability trigger message
         trigger_message = self.game_engine.next_message()
         assert trigger_message.type == MessageType.STEP_EXECUTED
-        # Check that message has event data about the ability trigger
-        assert trigger_message.event_data is not None or trigger_message.step is not None
         
-        # Get effect messages for healed Musketeers
-        effect_messages = []
-        for _ in range(3):  # Three Musketeer characters
-            effect_message = self.game_engine.next_message()
-            effect_messages.append(effect_message)
+        # Get effect execution message (queuing choices)
+        effect_message = self.game_engine.next_message()
+        assert effect_message.type == MessageType.STEP_EXECUTED
         
-        # Verify healing (up to 2 damage removed from each)
-        assert musketeer_heavy_damage.damage == 1, "Heavy damage Musketeer should have 2 damage removed (3 -> 1)"
+        # Handle sequential choices for each damaged Musketeer
+        from lorcana_sim.engine.game_moves import ChoiceMove
+        
+        # First choice: Light Musketeer (1 damage) - processed first due to reverse order
+        choice1_message = self.game_engine.next_message()
+        assert choice1_message.type == MessageType.CHOICE_REQUIRED
+        assert "Lightly Damaged Musketeer" in choice1_message.choice.prompt
+        # Choose to heal 1 damage
+        choice1_move = ChoiceMove(choice_id=choice1_message.choice.choice_id, option="heal_1")
+        choice1_result = self.game_engine.next_message(choice1_move)
+        
+        # Effect message for first healing
+        effect1_message = self.game_engine.next_message()
+        assert effect1_message.type == MessageType.STEP_EXECUTED
+        
+        # Second choice: Heavy Musketeer (3 damage) - processed second due to reverse order
+        choice2_message = self.game_engine.next_message()
+        assert choice2_message.type == MessageType.CHOICE_REQUIRED
+        assert "Heavily Damaged Musketeer" in choice2_message.choice.prompt
+        # Choose to heal 2 damage
+        choice2_move = ChoiceMove(choice_id=choice2_message.choice.choice_id, option="heal_2")
+        choice2_result = self.game_engine.next_message(choice2_move)
+        
+        # Effect message for second healing
+        effect2_message = self.game_engine.next_message()
+        assert effect2_message.type == MessageType.STEP_EXECUTED
+        
+        # No choice for Healthy Musketeer (0 damage)
+        
+        # Verify healing results - each Musketeer healed individually
         assert musketeer_light_damage.damage == 0, "Light damage Musketeer should have 1 damage removed (1 -> 0)"
+        assert musketeer_heavy_damage.damage == 1, "Heavy damage Musketeer should have 2 damage removed (3 -> 1)"
         assert musketeer_no_damage.damage == 0, "Healthy Musketeer should remain at 0 damage"
 
 

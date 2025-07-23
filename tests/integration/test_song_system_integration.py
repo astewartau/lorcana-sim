@@ -216,13 +216,10 @@ class TestSongSystemIntegration(GameEngineTestBase):
         # Attempt to sing should fail due to cost mismatch
         # Note: Currently system allows this, might need validation logic
         # For now, test that character gets exerted but it shouldn't ideally work
-        try:
-            sing_message = self.game_engine.next_message(SingMove(regular_character, expensive_song))
-            # If it succeeds, that indicates the validation needs to be stricter
-            # For now we'll just verify the basic mechanics work
-            assert sing_message.type == MessageType.STEP_EXECUTED
-        except Exception:
-            pass  # Validation worked correctly
+        sing_message = self.game_engine.next_message(SingMove(regular_character, expensive_song))
+        # If it succeeds, that indicates the validation needs to be stricter
+        # For now we'll just verify the basic mechanics work
+        assert sing_message.type == MessageType.STEP_EXECUTED
     
     def test_character_cost_matches_song_singer_cost(self):
         """Test that character cost must match or exceed song's singer cost requirement."""
@@ -324,12 +321,9 @@ class TestSongSystemIntegration(GameEngineTestBase):
         
         # Attempt to sing should fail due to character being exerted
         # The sing_song method should return False and not proceed
-        try:
-            sing_message = self.game_engine.next_message(SingMove(character, song_card))
-            # If it processes, check that the song wasn't actually moved
-            assert song_card in self.player1.hand, "Song should still be in hand if singing failed"
-        except Exception:
-            pass  # Validation correctly prevented the action
+        sing_message = self.game_engine.next_message(SingMove(character, song_card))
+        # If it processes, check that the song wasn't actually moved
+        assert song_card in self.player1.hand, "Song should still be in hand if singing failed"
     
     def test_song_with_complex_singer_requirements(self):
         """Test songs with more complex singer cost requirements."""

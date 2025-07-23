@@ -81,14 +81,12 @@ class TestClearThePathIntegration(BaseNamedAbilityTest):
         self.player2.characters_in_play.extend([opponent1, opponent2, opponent3])
         
         # Simulate characters entering/leaving play to update cost reduction
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=opponent1,
             player=self.player2,
-            game_state=self.game_state
+            additional_data={'ability_owner': clear_the_path_char}
         )
-        
-        self.event_manager.trigger_event(event_context)
         
         # CLEAR THE PATH should provide cost reduction for low-cost characters
         assert low_cost_char.cost <= 2  # Eligible for cost reduction
@@ -178,14 +176,12 @@ class TestClearThePathIntegration(BaseNamedAbilityTest):
         opponent.exerted = True
         
         # Simulate relevant events that would trigger ability updates
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=opponent,
             player=self.player2,
-            game_state=self.game_state
+            additional_data={'ability_owner': clear_the_path_char}
         )
-        
-        self.event_manager.trigger_event(event_context)
         
         # CLEAR THE PATH should update its cost reduction
         clear_the_path_ability = clear_the_path_char.composable_abilities[0]

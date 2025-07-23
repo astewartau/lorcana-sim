@@ -20,12 +20,8 @@ class ComposableListener:
     
     def should_trigger(self, event_context: EventContext) -> bool:
         """Check if this listener should trigger for the event."""
-        try:
-            result = self.trigger_condition(event_context)
-            return result
-        except Exception as e:
-            # If trigger check fails, don't trigger
-            return False
+        result = self.trigger_condition(event_context)
+        return result
     
     def execute(self, event_context: EventContext) -> None:
         """Execute this listener's effect."""
@@ -48,82 +44,94 @@ class ComposableListener:
         # Queue ability trigger effect instead of direct effect (TWO-STAGE EXECUTION)
         action_queue = context.get('action_queue')
         
-        if action_queue:
-            try:
-                from ....engine.action_queue import ActionPriority
-                from .effects import AbilityTriggerEffect, TargetedEffect, ChoiceGenerationEffect
-                
-            except Exception as e:
-                return
+        from ....engine.action_queue import ActionPriority
+        from .effects import AbilityTriggerEffect, TargetedEffect, ChoiceGenerationEffect
             
-            # Check if this is already a ChoiceGenerationEffect (new pattern)
-            if isinstance(self.effect, ChoiceGenerationEffect):
-                # For choice effects, queue the ChoiceGenerationEffect directly
-                # It will handle creating the choice and queueing the follow-up effect
-                trigger_effect = AbilityTriggerEffect(
-                    ability_name=self.name,
-                    source_card=context.get('ability_owner', event_context.source),
-                    actual_effect=self.effect  # This is already a ChoiceGenerationEffect
-                )
-            else:
-                # For non-choice effects, resolve targets immediately and set up TargetedEffect
-                targets = self.target_selector.select(context)
-                context['resolved_targets'] = targets  # Pre-resolve targets for TargetedEffect
-                
-                targeted_effect = TargetedEffect(
-                    base_effect=self.effect,
-                    ability_name=self.name
-                )
-                
-                trigger_effect = AbilityTriggerEffect(
-                    ability_name=self.name,
-                    source_card=context.get('ability_owner', event_context.source),
-                    actual_effect=targeted_effect
-                )
-            
-            try:
-                action_queue.enqueue(
-                    effect=trigger_effect,  # Queue the wrapper with the appropriate effect
-                    target=event_context.source,  # Use the ability owner as the initial target
-                    context=context,
-                    priority=ActionPriority.HIGH,  # Triggered effects go to front
-                    source_description=f"✨ Triggered {getattr(context.get('ability_owner'), 'name', 'Unknown')}'s {self.name}: {str(self.effect)}"
-                )
-            except Exception as e:
-                # Log error but don't crash the game
-                pass
+        
+        # Check if this is already a ChoiceGenerationEffect (new pattern)
+        if isinstance(self.effect, ChoiceGenerationEffect):
+            # For choice effects, queue the ChoiceGenerationEffect directly
+            # It will handle creating the choice and queueing the follow-up effect
+            trigger_effect = AbilityTriggerEffect(
+                ability_name=self.name,
+                source_card=context.get('ability_owner', event_context.source),
+                actual_effect=self.effect  # This is already a ChoiceGenerationEffect
+            )
         else:
-            # Fallback: apply immediately if no action_queue available (backwards compatibility)
-            try:
-                from .effects import TargetedEffect, ChoiceGenerationEffect
-                
-                if isinstance(self.effect, ChoiceGenerationEffect):
-                    # Cannot handle choice effects without action queue
-                    print(f"Warning: Cannot execute choice effect {self.name} without action queue")
-                    return
-                
-                # Create targeted effect for immediate execution
-                targeted_effect = TargetedEffect(
-                    base_effect=self.effect,
-                    ability_name=self.name
-                )
-                
-                # For immediate execution, we need to provide resolved targets
-                # Use the target selector to get targets directly
-                targets = self.target_selector.select(context)
-                context['resolved_targets'] = targets  # Always set, even if empty
-                
-                # For effects that don't need targets (like PreventEffect), just apply directly
-                from .target_selectors import NoTargetSelector
-                if isinstance(self.target_selector, NoTargetSelector):
-                    # Apply effect directly without targets
-                    self.effect.apply(event_context.source, context)
-                elif targets:
-                    # Apply through TargetedEffect wrapper
-                    targeted_effect.apply(event_context.source, context)
-            except Exception as e:
-                # Log error but don't crash the game
-                print(f"Error applying effect {self.effect} (fallback): {e}")
+            # For non-choice effects, resolve targets immediately and set up TargetedEffect
+            targets = self.target_selector.select(context)
+            context['resolved_targets'] = targets  # Pre-resolve targets for TargetedEffect
+            
+            targeted_effect = TargetedEffect(
+                base_effect=self.effect,
+                ability_name=self.name
+            )
+            
+            trigger_effect = AbilityTriggerEffect(
+                ability_name=self.name,
+                source_card=context.get('ability_owner', event_context.source),
+                actual_effect=targeted_effect
+            )
+        
+        # Get full ability description for richer trigger messages
+        full_description = self._get_full_ability_description(context)
+        
+        action_queue.enqueue(
+            effect=trigger_effect,  # Queue the wrapper with the appropriate effect
+            target=event_context.source,  # Use the ability owner as the initial target
+            context=context,
+            priority=ActionPriority.HIGH,  # Triggered effects go to front
+            source_description=f"✨ Triggered {getattr(context.get('ability_owner'), 'name', 'Unknown')}'s {self.name}: {full_description}"
+        )
+    
+    def _get_full_ability_description(self, context: dict) -> str:
+        """Get the full description of this ability for trigger messages.
+        
+        Args:
+            context: The context dict containing ability_owner and other data
+            
+        Returns:
+            Full ability description if available, fallback to effect string
+        """
+        ability_owner = context.get('ability_owner')
+        
+        # First try: Get description from card's full_text
+        if ability_owner and hasattr(ability_owner, 'full_text') and ability_owner.full_text:
+            # Look for this specific ability name in the full_text
+            full_text = ability_owner.full_text
+            
+            # Try to extract the specific ability description
+            # Most cards have format like "ABILITY_NAME - Description text"
+            if self.name in full_text:
+                lines = full_text.split('\n')
+                for line in lines:
+                    if self.name in line and ' - ' in line:
+                        # Extract text after the ability name and dash
+                        parts = line.split(' - ', 1)
+                        if len(parts) > 1:
+                            return parts[1].strip()
+        
+        # Second try: Get description from named ability registry docstring
+        try:
+            from .named_abilities.registry import _NAMED_ABILITY_REGISTRY
+            creator_func = _NAMED_ABILITY_REGISTRY.get(self.name)
+            if creator_func and hasattr(creator_func, '__doc__') and creator_func.__doc__:
+                doc = creator_func.__doc__.strip()
+                if doc:
+                    # Extract the first line which contains the ability description
+                    first_line = doc.split('\n')[0].strip()
+                    # Remove the ability name prefix if present (e.g., "THAT'S BETTER - ")
+                    if self.name in first_line and ' - ' in first_line:
+                        parts = first_line.split(' - ', 1)
+                        if len(parts) > 1:
+                            return parts[1].strip()
+                    return first_line
+        except ImportError:
+            # Registry might not be available in all contexts
+            pass
+        
+        # Fallback: Use the effect string representation
+        return str(self.effect)
     
     def relevant_events(self) -> List[GameEvent]:
         """Get list of events this listener cares about."""
@@ -201,6 +209,10 @@ class ComposableAbility:
     
     def register_with_event_manager(self, event_manager) -> None:
         """Register this ability with the event manager."""
+        # Don't register again if already registered with the same event manager
+        if self._event_manager is event_manager:
+            return
+            
         self._event_manager = event_manager
         
         # Use the new composable ability registration if available

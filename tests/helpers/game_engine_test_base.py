@@ -207,3 +207,47 @@ class GameEngineTestBase:
     def assert_message_has_event_data(self, message):
         """Assert message has event data (for ability trigger verification)."""
         assert message.event_data is not None or message.step is not None, "Message should have event data or step information"
+    
+    def create_event_context_with_action_queue(self, event_type, source=None, target=None, 
+                                              player=None, additional_data=None):
+        """Create EventContext with proper action queue and choice manager context.
+        
+        This helper ensures all integration tests have consistent context setup for 
+        triggering composable abilities that require action queue access.
+        """
+        from lorcana_sim.engine.event_system import EventContext
+        
+        # Base context data with required components
+        base_data = {
+            'action_queue': self.game_engine.execution_engine.action_queue,
+            'choice_manager': self.game_engine.choice_manager
+        }
+        
+        # Merge with any additional data provided
+        if additional_data:
+            base_data.update(additional_data)
+        
+        return EventContext(
+            event_type=event_type,
+            source=source,
+            target=target,
+            player=player or self.game_state.current_player,
+            game_state=self.game_state,
+            additional_data=base_data
+        )
+    
+    def trigger_event_with_context(self, event_type, source=None, target=None, 
+                                  player=None, additional_data=None):
+        """Trigger an event with proper action queue context and process any queued effects.
+        
+        This is the preferred method for triggering events in integration tests.
+        """
+        event_context = self.create_event_context_with_action_queue(
+            event_type, source, target, player, additional_data
+        )
+        
+        # Trigger the event
+        self.game_engine.event_manager.trigger_event(event_context)
+        
+        # Process any queued ability effects
+        return self.process_ability_messages()

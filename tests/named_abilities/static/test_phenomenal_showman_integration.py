@@ -65,13 +65,11 @@ class TestPhenomenalShowmanIntegration(BaseNamedAbilityTest):
         self.player2.characters_in_play.append(opponent_char)
         
         # Simulate turn start (when ready normally happens)
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.TURN_BEGINS,
             player=self.player2,
-            game_state=self.game_state
+            additional_data={'ability_owner': showman_char}
         )
-        
-        self.event_manager.trigger_event(event_context)
         
         # PHENOMENAL SHOWMAN should prevent opponent from readying
         phenomenal_showman_ability = showman_char.composable_abilities[0]
@@ -94,13 +92,11 @@ class TestPhenomenalShowmanIntegration(BaseNamedAbilityTest):
         self.player2.characters_in_play.append(opponent_char)
         
         # Simulate turn start
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.TURN_BEGINS,
             player=self.player2,
-            game_state=self.game_state
+            additional_data={'ability_owner': showman_char}
         )
-        
-        self.event_manager.trigger_event(event_context)
         
         # Should not prevent readying when showman is ready
         assert not showman_char.exerted
@@ -165,14 +161,12 @@ class TestPhenomenalShowmanIntegration(BaseNamedAbilityTest):
         showman_char.exerted = True
         
         # Simulate exertion event
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_EXERTS,
             source=showman_char,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': showman_char}
         )
-        
-        self.event_manager.trigger_event(event_context)
         
         # Should now affect opponents
         phenomenal_showman_ability = showman_char.composable_abilities[0]
@@ -194,14 +188,12 @@ class TestPhenomenalShowmanIntegration(BaseNamedAbilityTest):
         showman_char.exerted = False
         
         # Simulate ready event
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_READIED,
             source=showman_char,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': showman_char}
         )
-        
-        self.event_manager.trigger_event(event_context)
         
         # Effect should no longer apply
         assert not showman_char.exerted

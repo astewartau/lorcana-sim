@@ -101,30 +101,22 @@ class ConditionEvaluator:
         self.last_evaluated_turn = game_state.turn_number
         self.last_evaluated_phase = game_state.current_phase.value
         
-        try:
-            # Use the specific effects evaluator instead of the generic zone manager
-            from .zone_manager import ZoneManager
-            zone_manager = game_state._zone_management.zone_manager
-            zone_events = self.evaluate_specific_effects(
-                list(zone_manager.all_effects), 
-                game_state, 
-                trigger
-            )
-            events.extend(zone_events)
-            
-            if self.debug_mode:
-                self._log_evaluation("EVALUATION_COMPLETED", game_state, trigger, {
-                    "events_generated": len(zone_events),
-                    "total_evaluations": self.evaluation_counter
-                })
+        # Use the specific effects evaluator instead of the generic zone manager
+        from .zone_manager import ZoneManager
+        zone_manager = game_state._zone_management.zone_manager
+        zone_events = self.evaluate_specific_effects(
+            list(zone_manager.all_effects), 
+            game_state, 
+            trigger
+        )
+        events.extend(zone_events)
         
-        except Exception as e:
-            if self.debug_mode:
-                self._log_evaluation("EVALUATION_ERROR", game_state, trigger, {
-                    "error": str(e)
-                })
-            # Don't let evaluation errors crash the game
-            print(f"Error during condition evaluation: {e}")
+        if self.debug_mode:
+            self._log_evaluation("EVALUATION_COMPLETED", game_state, trigger, {
+                "events_generated": len(zone_events),
+                "total_evaluations": self.evaluation_counter
+            })
+        
         
         return events
     
@@ -136,50 +128,42 @@ class ConditionEvaluator:
         events = []
         
         for effect in effects:
-            try:
-                # Check if effect is in valid zone
-                if not effect.is_in_valid_zone(game_state):
-                    # If effect was active but source moved to invalid zone, deactivate
-                    if effect.is_active:
-                        event = effect.remove_effect(game_state)
-                        if event:
-                            events.append(event)
-                    continue
-                
-                # Force evaluation for specific effects
-                if trigger == EvaluationTrigger.FORCE_EVALUATE:
-                    print(f"Force evaluating effect {effect.effect_id} in {game_state.current_phase.value} phase")
-                    effect.last_evaluation_turn = -1
-                
-                # Skip if we don't need to evaluate
-                if not effect.should_evaluate(game_state):
-                    print(f"Skipping evaluation for effect {effect.effect_id} in {game_state.current_phase.value} phase")
-                    continue
-                
-                # Evaluate condition
-                print(f"Evaluating effect {effect.effect_id} in {game_state.current_phase.value} phase")
-                should_be_active = effect.evaluate_condition(game_state)
-                
-                if should_be_active and not effect.is_active:
-                    print(f"Effect {effect.effect_id} is now active in {game_state.current_phase.value} phase")
-                    # Apply effect - only return events for abilities that actually trigger
-                    event = effect.apply_effect(game_state)
+            # Check if effect is in valid zone
+            if not effect.is_in_valid_zone(game_state):
+                # If effect was active but source moved to invalid zone, deactivate
+                if effect.is_active:
+                    event = effect.remove_effect(game_state)
                     if event:
                         events.append(event)
-                elif not should_be_active and effect.is_active:
-                    print(f"Effect {effect.effect_id} is no longer active in {game_state.current_phase.value} phase")
-                    # Remove effect - but don't create debug messages for abilities that stop triggering
-                    # This prevents spam of abilities that didn't actually trigger
-                    effect.remove_effect(game_state)
-                    # Note: No event added to prevent debug spam
+                continue
             
-            except Exception as e:
-                if self.debug_mode:
-                    self._log_evaluation("EFFECT_ERROR", game_state, trigger, {
-                        "effect_id": effect.effect_id,
-                        "error": str(e)
-                    })
-                print(f"Error evaluating effect {effect.effect_id}: {e}")
+            # Force evaluation for specific effects
+            if trigger == EvaluationTrigger.FORCE_EVALUATE:
+                print(f"Force evaluating effect {effect.effect_id} in {game_state.current_phase.value} phase")
+                effect.last_evaluation_turn = -1
+            
+            # Skip if we don't need to evaluate
+            if not effect.should_evaluate(game_state):
+                print(f"Skipping evaluation for effect {effect.effect_id} in {game_state.current_phase.value} phase")
+                continue
+            
+            # Evaluate condition
+            print(f"Evaluating effect {effect.effect_id} in {game_state.current_phase.value} phase")
+            should_be_active = effect.evaluate_condition(game_state)
+            
+            if should_be_active and not effect.is_active:
+                print(f"Effect {effect.effect_id} is now active in {game_state.current_phase.value} phase")
+                # Apply effect - only return events for abilities that actually trigger
+                event = effect.apply_effect(game_state)
+                if event:
+                    events.append(event)
+            elif not should_be_active and effect.is_active:
+                print(f"Effect {effect.effect_id} is no longer active in {game_state.current_phase.value} phase")
+                # Remove effect - but don't create debug messages for abilities that stop triggering
+                # This prevents spam of abilities that didn't actually trigger
+                effect.remove_effect(game_state)
+                # Note: No event added to prevent debug spam
+            
         
         return events
     

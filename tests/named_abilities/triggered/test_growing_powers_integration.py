@@ -48,14 +48,12 @@ class TestGrowingPowersIntegration(BaseNamedAbilityTest):
         # Growing powers character enters play
         self.player1.characters_in_play.append(growing_powers_char)
         
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=growing_powers_char,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': growing_powers_char}
         )
-        
-        results = self.event_manager.trigger_event(event_context)
         
         # Verify ability exists and is properly configured
         growing_powers_ability = growing_powers_char.composable_abilities[0]
@@ -81,14 +79,12 @@ class TestGrowingPowersIntegration(BaseNamedAbilityTest):
         # Growing powers character enters play
         self.player1.characters_in_play.append(growing_powers_char)
         
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=growing_powers_char,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': growing_powers_char}
         )
-        
-        results = self.event_manager.trigger_event(event_context)
         
         # GROWING POWERS should provide positioning options
         growing_powers_ability = growing_powers_char.composable_abilities[0]
@@ -107,14 +103,12 @@ class TestGrowingPowersIntegration(BaseNamedAbilityTest):
         # Growing powers character enters play
         self.player1.characters_in_play.append(growing_powers_char)
         
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=growing_powers_char,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': growing_powers_char}
         )
-        
-        results = self.event_manager.trigger_event(event_context)
         
         # Should still trigger even with empty board
         growing_powers_ability = growing_powers_char.composable_abilities[0]
@@ -130,14 +124,12 @@ class TestGrowingPowersIntegration(BaseNamedAbilityTest):
         self.player1.characters_in_play.append(existing_char)
         self.player1.characters_in_play.append(growing_powers_char)
         
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=growing_powers_char,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': growing_powers_char}
         )
-        
-        results = self.event_manager.trigger_event(event_context)
         
         # Ability should trigger but positioning is optional
         growing_powers_ability = growing_powers_char.composable_abilities[0]
@@ -154,14 +146,12 @@ class TestGrowingPowersIntegration(BaseNamedAbilityTest):
         # Other character enters play (should NOT trigger GROWING POWERS)
         self.player1.characters_in_play.append(other_char)
         
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=other_char,  # Different character entering
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': other_char}
         )
-        
-        results = self.event_manager.trigger_event(event_context)
         
         # Should not trigger for other characters
         growing_powers_ability = growing_powers_char.composable_abilities[0]
@@ -175,26 +165,22 @@ class TestGrowingPowersIntegration(BaseNamedAbilityTest):
         # First character enters
         self.player1.characters_in_play.append(growing_powers_char1)
         
-        event_context1 = EventContext(
+        event_context1 = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=growing_powers_char1,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': growing_powers_char1}
         )
-        
-        self.event_manager.trigger_event(event_context1)
         
         # Second character enters
         self.player1.characters_in_play.append(growing_powers_char2)
         
-        event_context2 = EventContext(
+        event_context2 = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=growing_powers_char2,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': growing_powers_char2}
         )
-        
-        self.event_manager.trigger_event(event_context2)
         
         # Both should have triggered their abilities
         assert growing_powers_char1.composable_abilities[0].name == "GROWING POWERS"
@@ -215,14 +201,12 @@ class TestGrowingPowersIntegration(BaseNamedAbilityTest):
         # Growing powers character enters
         self.player1.characters_in_play.append(growing_powers_char)
         
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=growing_powers_char,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': growing_powers_char}
         )
-        
-        results = self.event_manager.trigger_event(event_context)
         
         # Should be aware of all existing characters for positioning
         growing_powers_ability = growing_powers_char.composable_abilities[0]
@@ -241,14 +225,12 @@ class TestGrowingPowersIntegration(BaseNamedAbilityTest):
         # Growing powers character enters friendly board
         self.player1.characters_in_play.append(growing_powers_char)
         
-        event_context = EventContext(
+        event_context = self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_ENTERS_PLAY,
             source=growing_powers_char,
             player=self.player1,
-            game_state=self.game_state
+            additional_data={'ability_owner': growing_powers_char}
         )
-        
-        results = self.event_manager.trigger_event(event_context)
         
         # Should only affect friendly board
         assert len(self.player1.characters_in_play) == 1
