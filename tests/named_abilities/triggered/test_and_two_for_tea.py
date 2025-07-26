@@ -77,9 +77,9 @@ class TestAndTwoForTeaIntegration(GameEngineTestBase):
         self.player1.hand.append(tea_character)
         
         # Recreate the game engine to register abilities properly
-        from lorcana_sim.engine.game_engine import GameEngine, ExecutionMode
+        from lorcana_sim.engine.game_engine import GameEngine
         self.game_state = self.game_state.__class__([self.player1, self.player2])
-        self.game_engine = GameEngine(self.game_state, ExecutionMode.MANUAL)
+        self.game_engine = GameEngine(self.game_state)
         self.game_engine.start_game()
         self.advance_to_play_phase()
         self.setup_player_ink(self.player1, ink_count=7)

@@ -6,7 +6,7 @@ from lorcana_sim.models.game.game_state import GameState
 from lorcana_sim.models.game.player import Player
 from lorcana_sim.models.cards.character_card import CharacterCard
 from lorcana_sim.models.cards.base_card import CardColor, Rarity
-from lorcana_sim.engine.game_engine import ExecutionMode
+
 from lorcana_sim.engine.game_moves import PlayMove, ChallengeMove, QuestMove, PassMove
 from lorcana_sim.models.abilities.composable.keyword_abilities import (
     create_resist_ability, create_ward_ability, create_bodyguard_ability,
@@ -33,7 +33,7 @@ class BaseKeywordAbilityTest:
         
         # Create game state and engine
         self.game_state = GameState([self.player1, self.player2])
-        self.game_engine = GameEngine(self.game_state, ExecutionMode.MANUAL)
+        self.game_engine = GameEngine(self.game_state)
         
         # Start the game
         self.game_engine.start_game()

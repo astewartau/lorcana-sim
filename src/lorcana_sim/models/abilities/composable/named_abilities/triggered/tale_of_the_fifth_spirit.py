@@ -4,7 +4,7 @@ from typing import Any
 from ..registry import register_named_ability
 from ...composable_ability import quick_ability
 from ...effects import GAIN_LORE, ConditionalEffect
-from ...target_selectors import CONTROLLER
+from ...target_selectors import SELF
 from ...triggers import when_enters_play
 
 
@@ -36,7 +36,7 @@ def create_tale_of_the_fifth_spirit(character: Any, ability_data: dict):
         "TALE OF THE FIFTH SPIRIT",
         character,
         when_enters_play(character),
-        CONTROLLER,
+        SELF,
         ConditionalEffect(
             condition=_opponent_has_exerted_condition,
             effect=GAIN_LORE(1)

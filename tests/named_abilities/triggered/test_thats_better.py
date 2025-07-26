@@ -111,20 +111,20 @@ class TestThatsBetterIntegration(GameEngineTestBase):
                                if 'challenger' in ability.name.lower()]
         print(f"Challenger abilities found: {challenger_abilities}")
         
-        # CURRENT SYSTEM: Instead, check that challenger_bonuses list has the bonus
-        print(f"Rajah challenger_bonuses: {getattr(rajah, 'challenger_bonuses', [])}")
-        assert len(getattr(rajah, 'challenger_bonuses', [])) >= 1, \
-            "Rajah should have challenger bonus in current system"
+        # NEW SYSTEM: Check that temporary challenger ability was created
+        print(f"Rajah has {len(challenger_abilities)} challenger abilities")
+        assert len(challenger_abilities) >= 1, \
+            "Rajah should have temporary challenger ability in new system"
         
-        challenger_bonus = rajah.challenger_bonuses[0]
-        assert challenger_bonus == (2, "this_turn"), \
-            f"Expected (2, 'this_turn'), got {challenger_bonus}"
+        temp_ability = challenger_abilities[0]
+        assert temp_ability.strength_bonus == 2, \
+            f"Expected strength bonus of 2, got {temp_ability.strength_bonus}"
         
-        # PROBLEM: The current system does NOT register as full composable ability
-        print(f"PROBLEM: Challenger not in composable_abilities, found {len(challenger_abilities)} abilities")
+        # SUCCESS: The new system properly registers as full composable ability
+        print(f"SUCCESS: Challenger ability found in composable_abilities: {len(challenger_abilities)} abilities")
         
-        # PROBLEM: No event system registration for turn-end cleanup
-        print("PROBLEM: No event system registration for automatic cleanup")
+        # SUCCESS: Event system registration for turn-end cleanup
+        print("SUCCESS: Event system registration enables automatic cleanup")
     
     def test_thats_better_affects_combat_outcome(self):
         """Test that Challenger +2 affects combat outcome - character wins fight they would otherwise lose."""
@@ -146,16 +146,16 @@ class TestThatsBetterIntegration(GameEngineTestBase):
         context = {'game_state': self.game_state, 'player': self.player1}
         challenger_effect.apply(rajah, context)
         
-        # Verify the bonus is applied to the character
-        assert hasattr(rajah, 'challenger_bonuses'), "Character should have challenger_bonuses attribute"
-        assert len(rajah.challenger_bonuses) == 1, "Should have one challenger bonus"
-        assert rajah.challenger_bonuses[0] == (2, "this_turn"), "Bonus should be +2 for this turn"
+        # Verify temporary challenger ability was added
+        challenger_abilities = [ability for ability in rajah.composable_abilities 
+                              if 'Challenger' in ability.name]
+        assert len(challenger_abilities) == 1, "Should have one temporary challenger ability"
         
-        # Verify current_challenger_bonus property works
-        assert rajah.current_challenger_bonus == 2, "Current challenger bonus should be 2"
+        temp_ability = challenger_abilities[0]
+        assert temp_ability.strength_bonus == 2, "Should grant +2 strength bonus"
         
-        print(f"SUCCESS: Rajah now has challenger bonus: {rajah.challenger_bonuses}")
-        print(f"Current challenger bonus: {rajah.current_challenger_bonus}")
+        print(f"SUCCESS: Rajah now has temporary challenger ability: {temp_ability}")
+        print(f"Strength bonus: {temp_ability.strength_bonus}")
         print("NOTE: Combat integration testing requires full game setup which is complex")
     
     def test_thats_better_removed_after_turn_ends(self):
@@ -171,17 +171,46 @@ class TestThatsBetterIntegration(GameEngineTestBase):
             color=CardColor.EMERALD
         )
         
+        # Put Rajah in play so the temporary ability can work correctly
+        self.player1.characters_in_play.append(rajah)
+        rajah.controller = self.player1
+        
         # Manually apply Challenger +2 to demonstrate the concept
         from lorcana_sim.models.abilities.composable.effects import ChallengerEffect
         challenger_effect = ChallengerEffect(2, "this_turn")
-        context = {'game_state': self.game_state, 'player': self.player1}
+        context = {
+            'game_state': self.game_state, 
+            'player': self.player1,
+            'event_manager': self.game_engine.event_manager  # Provide event manager
+        }
         challenger_effect.apply(rajah, context)
         
-        # Verify the bonus is applied initially
-        assert len(rajah.challenger_bonuses) == 1, "Should have challenger bonus initially"
-        assert rajah.challenger_bonuses[0] == (2, "this_turn"), "Bonus should be +2 for this turn"
+        # Verify temporary challenger ability was added
+        challenger_abilities = [ability for ability in rajah.composable_abilities 
+                              if 'Challenger' in ability.name]
+        assert len(challenger_abilities) == 1, "Should have challenger ability initially"
+        temp_ability = challenger_abilities[0]
+        assert temp_ability.strength_bonus == 2, "Should grant +2 strength bonus"
         
-        print(f"BEFORE turn end - Rajah challenger_bonuses: {rajah.challenger_bonuses}")
+        # Check if TemporaryChallengerAbility was created
+        temp_abilities = [a for a in rajah.composable_abilities if 'Challenger' in str(a)]
+        print(f"Temporary challenger abilities found: {temp_abilities}")
+        
+        # Check if it's registered with the event manager
+        turn_end_listeners = self.game_engine.event_manager._composable_listeners.get(
+            self.game_engine.event_manager.__class__.__module__.split('.')[-1] == 'event_system' and 
+            hasattr(self.game_engine.event_manager, '_composable_listeners') and
+            hasattr(self.game_engine.event_manager.__class__, 'GameEvent') and 
+            getattr(self.game_engine.event_manager.__class__, 'GameEvent', None) and
+            getattr(getattr(self.game_engine.event_manager.__class__, 'GameEvent', None), 'TURN_ENDS', None)
+        )
+        # Simplified check
+        from lorcana_sim.engine.event_system import GameEvent
+        turn_end_listeners = self.game_engine.event_manager._composable_listeners.get(GameEvent.TURN_ENDS, [])
+        print(f"TURN_ENDS listeners: {len(turn_end_listeners)}")
+        
+        print(f"BEFORE turn end - Rajah composable_abilities: {[str(a) for a in rajah.composable_abilities]}")
+        print(f"BEFORE turn end - Challenger abilities: {len(challenger_abilities)}")
         
         # Try to pass the turn (this may have various issues but we'll see what happens)
         try:
@@ -190,23 +219,27 @@ class TestThatsBetterIntegration(GameEngineTestBase):
         except Exception as e:
             print(f"Pass turn failed with: {e}")
         
-        # Check if bonuses were cleared (they won't be, demonstrating the bug)
-        print(f"AFTER turn end - Rajah challenger_bonuses: {rajah.challenger_bonuses}")
+        # Check if temporary abilities were cleared  
+        challenger_abilities_after = [ability for ability in rajah.composable_abilities 
+                                    if 'Challenger' in ability.name]
+        print(f"AFTER turn end - Rajah composable_abilities: {[str(a) for a in rajah.composable_abilities]}")
+        print(f"AFTER turn end - Challenger abilities: {len(challenger_abilities_after)}")
         
-        # THE PROBLEM: Bonuses persist because clear_temporary_bonuses is never called
-        if len(rajah.challenger_bonuses) > 0:
-            print("PROBLEM DEMONSTRATED: Challenger bonus was NOT cleared after turn end!")
-            print("This proves that _process_turn_end_effects() is never called")
+        # Check if it's still registered
+        turn_end_listeners_after = self.game_engine.event_manager._composable_listeners.get(GameEvent.TURN_ENDS, [])
+        print(f"TURN_ENDS listeners after: {len(turn_end_listeners_after)}")
         
-        # Test manual cleanup to show what SHOULD happen
-        print("Testing manual cleanup to show correct behavior:")
-        expired_effects = rajah.clear_temporary_bonuses(self.game_state)
-        print(f"After manual cleanup - Rajah challenger_bonuses: {rajah.challenger_bonuses}")
-        print(f"Expired effects: {expired_effects}")
+        # Check the new event-driven system
+        if len(challenger_abilities_after) == 0:
+            print("✅ SUCCESS: TemporaryChallengerAbility was removed from composable_abilities!")
+            print("✅ SUCCESS: New event-driven temporary ability system works correctly!")
+        else:
+            print("⚠️  WARNING: Temporary abilities were not properly cleaned up")
+            print("⚠️  This indicates the event-driven cleanup needs debugging")
         
-        # After manual cleanup, bonuses should be gone
-        assert len(rajah.challenger_bonuses) == 0, \
-            "Manual cleanup should remove 'this_turn' bonuses"
+        # Verify the temporary ability system works as expected
+        assert len(challenger_abilities_after) == 0, \
+            "Temporary challenger abilities should be removed after turn end"
 
 
 if __name__ == "__main__":

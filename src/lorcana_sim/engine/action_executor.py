@@ -8,7 +8,8 @@ from ..models.cards.item_card import ItemCard
 from ..models.cards.base_card import Card
 from .move_validator import MoveValidator
 from .event_system import GameEventManager, GameEvent, EventContext
-from .damage_calculator import DamageCalculator, DamageType
+from ..models.abilities.composable.effects import DamageEffect, DamageType
+from .action_queue import ActionPriority
 from .action_result import ActionResult, ActionResultType
 from .choice_system import GameChoiceManager
 from ..utils.logging_config import get_game_logger
@@ -19,12 +20,11 @@ class ActionExecutor:
     """Executes game actions and returns results."""
     
     def __init__(self, game_state: GameState, validator: MoveValidator, 
-                 event_manager: GameEventManager, damage_calculator: DamageCalculator,
+                 event_manager: GameEventManager,
                  choice_manager: GameChoiceManager, action_queue: Any = None):
         self.game_state = game_state
         self.validator = validator
         self.event_manager = event_manager
-        self.damage_calculator = damage_calculator
         self.choice_manager = choice_manager
         self.action_queue = action_queue
     
@@ -118,8 +118,8 @@ class ActionExecutor:
                 error_message="Failed to play character"
             )
         
-        # Set the turn played
-        card.turn_played = self.game_state.turn_number
+        # Characters now start with wet ink by default (is_dry = False)
+        # Ink drying is handled by DryInkEffect queued during PlayCharacterEffect
         
         # Register any conditional effects the card has
         self.game_state.register_card_conditional_effects(card)
@@ -315,49 +315,46 @@ class ActionExecutor:
         )
         self.event_manager.trigger_event(challenge_context)
         
-        # Calculate damage considering all modifiers
-        damage_to_defender = self.damage_calculator.calculate_damage(
-            attacker, defender, attacker.current_strength, DamageType.CHALLENGE
-        )
-        damage_to_attacker = self.damage_calculator.calculate_damage(
-            defender, attacker, defender.current_strength, DamageType.CHALLENGE
-        )
-        
-        # Apply damage
-        defender.damage += damage_to_defender
-        attacker.damage += damage_to_attacker
-        
-        
-        # Handle CHARACTER_TAKES_DAMAGE events
-        if damage_to_defender > 0:
-            damage_context = EventContext(
-                event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
-                player=opponent,
-                game_state=self.game_state,
-                source=defender,
-                additional_data={
-                    'damage_amount': damage_to_defender,
-                    'damage_source': attacker,
-                    'damage_type': DamageType.CHALLENGE
-                },
-                action_queue=self.action_queue
+        # Queue damage effects instead of applying directly
+        # Damage to defender
+        if attacker.current_strength > 0:
+            damage_to_defender = DamageEffect(
+                defender, 
+                attacker.current_strength, 
+                source=attacker, 
+                damage_type=DamageType.CHALLENGE
             )
-            self.event_manager.trigger_event(damage_context)
-        
-        if damage_to_attacker > 0:
-            damage_context = EventContext(
-                event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
-                player=current_player,
-                game_state=self.game_state,
-                source=attacker,
-                additional_data={
-                    'damage_amount': damage_to_attacker,
-                    'damage_source': defender,
-                    'damage_type': DamageType.CHALLENGE
+            self.action_queue.enqueue(
+                damage_to_defender, 
+                target=defender, 
+                context={
+                    'game_state': self.game_state,
+                    'event_manager': self.event_manager,
+                    'action_queue': self.action_queue
                 },
-                action_queue=self.action_queue
+                priority=ActionPriority.HIGH
             )
-            self.event_manager.trigger_event(damage_context)
+        
+        # Damage to attacker
+        if defender.current_strength > 0:
+            damage_to_attacker = DamageEffect(
+                attacker, 
+                defender.current_strength, 
+                source=defender, 
+                damage_type=DamageType.CHALLENGE
+            )
+            self.action_queue.enqueue(
+                damage_to_attacker, 
+                target=attacker, 
+                context={
+                    'game_state': self.game_state,
+                    'event_manager': self.event_manager,
+                    'action_queue': self.action_queue
+                },
+                priority=ActionPriority.HIGH
+            )
+        
+        # Note: CHARACTER_TAKES_DAMAGE events are now handled by DamageEffect
         
         # Record the action
         self.game_state.record_action("challenge_character")
@@ -369,8 +366,8 @@ class ActionExecutor:
             data={
                 'attacker': attacker,
                 'defender': defender,
-                'damage_to_attacker': damage_to_attacker,
-                'damage_to_defender': damage_to_defender,
+                'damage_queued_to_attacker': defender.current_strength,
+                'damage_queued_to_defender': attacker.current_strength,
                 'original_attacker_strength': original_attacker_strength,
                 'original_defender_strength': original_defender_strength,
                 'modified_attacker_strength': attacker.current_strength,
@@ -424,6 +421,12 @@ class ActionExecutor:
         
         # Execute phase-specific actions
         if current_phase == Phase.READY:
+            # Execute any phase effects scheduled for this ready phase
+            current_player = self.game_state.current_player
+            if hasattr(self.action_queue, 'execute_phase_effects'):
+                phase_action_ids = self.action_queue.execute_phase_effects("ready", current_player)
+                # The phase effects will be executed automatically by the queue
+            
             # Execute ready step
             readied_items = self.game_state.ready_step()
             
@@ -646,8 +649,25 @@ class ActionExecutor:
         # End the turn
         self.game_state.end_turn()
         
-        # Trigger TURN_BEGINS event for new player
+        # New player is now active and we're in READY phase
         new_player = self.game_state.current_player
+        
+        # CRITICAL: Execute phase effects for the new player's ready phase
+        # This is where DryInkEffect gets processed for characters played by this player
+        if hasattr(self.action_queue, 'execute_phase_effects'):
+            phase_action_ids = self.action_queue.execute_phase_effects("ready", new_player)
+        
+        # Trigger READY_PHASE event for new player's turn
+        ready_phase_context = EventContext(
+            event_type=GameEvent.READY_PHASE,
+            player=new_player,
+            game_state=self.game_state,
+            additional_data={'phase': 'ready'},
+            action_queue=self.action_queue
+        )
+        self.event_manager.trigger_event(ready_phase_context)
+        
+        # Trigger TURN_BEGINS event for new player
         turn_begin_context = EventContext(
             event_type=GameEvent.TURN_BEGINS,
             player=new_player,

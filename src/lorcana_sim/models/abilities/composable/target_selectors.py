@@ -739,3 +739,86 @@ def not_filter(filter_func):
     def negated_filter(character: Any, context: Dict[str, Any]) -> bool:
         return not filter_func(character, context)
     return negated_filter
+
+
+class CardSelector(TargetSelector):
+    """Select cards from a player's hand or discard pile."""
+    
+    def __init__(self, filter_func: Callable[[Any, Dict], bool] = None, 
+                 from_hand: bool = True, from_discard: bool = False, count: int = 1):
+        self.filter_func = filter_func or (lambda card, ctx: True)
+        self.from_hand = from_hand
+        self.from_discard = from_discard
+        self.count = count
+    
+    def select(self, context: Dict[str, Any]) -> List[Any]:
+        """Select cards from the specified zones."""
+        logger.debug("CardSelector.select called")
+        
+        # Get the player (controller) - try multiple ways
+        player = None
+        ability_owner = context.get('ability_owner')
+        if ability_owner and hasattr(ability_owner, 'controller'):
+            player = ability_owner.controller
+        else:
+            player = context.get('player')
+        
+        if not player:
+            logger.debug("No player found in context")
+            return []
+        
+        # Collect cards from specified zones
+        all_cards = []
+        
+        if self.from_hand and hasattr(player, 'hand'):
+            all_cards.extend(player.hand)
+            logger.debug(f"Added {len(player.hand)} cards from hand")
+        
+        if self.from_discard and hasattr(player, 'discard_pile'):
+            all_cards.extend(player.discard_pile)
+            logger.debug(f"Added {len(player.discard_pile)} cards from discard")
+        
+        # Apply filter
+        valid_cards = [card for card in all_cards 
+                      if self.filter_func(card, context)]
+        
+        logger.debug(f"Valid cards after filter: {len(valid_cards)} - {[getattr(c, 'name', str(c)) for c in valid_cards]}")
+        
+        # Return up to count cards
+        return valid_cards[:self.count] if self.count != 999 else valid_cards
+    
+    def get_choice_options(self, context: Dict[str, Any]) -> List[Any]:
+        """Get choice options for card selection."""
+        cards = self.select(context)
+        
+        # Import here to avoid circular imports
+        from ....engine.choice_system import ChoiceOption
+        
+        choice_options = []
+        for i, card in enumerate(cards):
+            card_name = getattr(card, 'name', str(card))
+            card_cost = getattr(card, 'cost', 'Unknown')
+            choice_options.append(ChoiceOption(
+                id=f"card_{i}",
+                description=f"{card_name} (Cost: {card_cost})",
+                target=card,
+                effect=None  # No effect needed for target selection
+            ))
+        
+        # Add "none" option if selection is optional ("may" effects)
+        is_optional = context.get('optional', True)
+        if is_optional:
+            choice_options.append(ChoiceOption(
+                id="none",
+                description="Choose no card",
+                target=None,
+                effect=None
+            ))
+        
+        return choice_options
+
+
+# Card selector constants
+CARDS_IN_HAND = CardSelector(from_hand=True, from_discard=False)
+CARDS_IN_DISCARD = CardSelector(from_hand=False, from_discard=True)
+ALL_CARDS = CardSelector(from_hand=True, from_discard=True)

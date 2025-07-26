@@ -1,7 +1,7 @@
 """Base class for GameEngine integration tests with proper setup and utilities."""
 
 from typing import List, Optional
-from lorcana_sim.engine.game_engine import GameEngine, ExecutionMode
+from lorcana_sim.engine.game_engine import GameEngine
 from lorcana_sim.models.game.game_state import GameState, Phase
 from lorcana_sim.models.game.player import Player
 from lorcana_sim.models.cards.character_card import CharacterCard
@@ -33,7 +33,7 @@ class GameEngineTestBase:
         
         # Create game state and engine
         self.game_state = GameState([self.player1, self.player2])
-        self.game_engine = GameEngine(self.game_state, ExecutionMode.MANUAL)
+        self.game_engine = GameEngine(self.game_state)
         
         # Start the game
         self.game_engine.start_game()

@@ -8,6 +8,13 @@ from ....utils.logging_config import get_game_logger
 
 logger = get_game_logger(__name__)
 
+
+class DamageType(Enum):
+    """Types of damage that can be dealt."""
+    CHALLENGE = "challenge"      # Damage from character challenges
+    ABILITY = "ability"          # Damage from ability effects
+    DIRECT = "direct"           # Direct damage (unmodifiable)
+
 class Effect(ABC):
     """Base class for composable effects."""
     
@@ -189,6 +196,165 @@ class ConditionalEffect(Effect):
 
 
 # =============================================================================
+# TEMPORARY ABILITY INFRASTRUCTURE FOR AUTO-EXPIRING ABILITIES
+# =============================================================================
+
+class TemporaryAbility:
+    """Base class for temporary abilities that auto-expire via event system."""
+    
+    def __init__(self, name: str, target: Any, expiration_trigger: 'GameEvent'):
+        """Initialize temporary ability.
+        
+        Args:
+            name: Name of the temporary ability
+            target: Character that has this temporary ability
+            expiration_trigger: GameEvent that causes this ability to expire
+        """
+        self.name = name
+        self.target = target
+        self.character = target  # Alias for compatibility with ComposableAbility interface
+        self.expiration_trigger = expiration_trigger
+        self._event_manager = None
+        self._registered = False
+        
+        # Zone validation for compatibility with ComposableAbility interface
+        from .conditional_effects import ActivationZone
+        self.activation_zones = {ActivationZone.PLAY}  # Default to play only
+        
+        # Create listeners for compatibility with GameEventManager
+        self.listeners = [TemporaryAbilityListener(self)]
+    
+    def get_relevant_events(self) -> List['GameEvent']:
+        """Return events this ability cares about (required by GameEventManager)."""
+        events = [self.expiration_trigger]
+        
+        # Add ability-specific events (override in subclasses)
+        ability_events = self.get_ability_events()
+        if ability_events:
+            events.extend(ability_events)
+            
+        return events
+    
+    def get_ability_events(self) -> List['GameEvent']:
+        """Override in subclasses to specify events the ability responds to."""
+        return []
+    
+    def register_with_event_manager(self, event_manager) -> None:
+        """Register this temporary ability with the event manager."""
+        if not self._registered:
+            self._event_manager = event_manager
+            event_manager.register_composable_ability(self)
+            self._registered = True
+    
+    def handle_event(self, event_context) -> None:
+        """Handle event triggering - called by GameEventManager."""
+        if event_context.event_type == self.expiration_trigger:
+            self._expire(event_context)
+        elif self.should_trigger(event_context):
+            self.apply_effect(event_context)
+    
+    def _expire(self, event_context) -> None:
+        """Remove this ability when expiration event occurs."""
+        if self.target and hasattr(self.target, 'composable_abilities'):
+            # Remove from target's ability list
+            if self in self.target.composable_abilities:
+                self.target.composable_abilities.remove(self)
+        
+        # Unregister from event system
+        if self._event_manager and self._registered:
+            # Remove from all event listener lists
+            for event_type in self.get_relevant_events():
+                if event_type in self._event_manager._composable_listeners:
+                    if self in self._event_manager._composable_listeners[event_type]:
+                        self._event_manager._composable_listeners[event_type].remove(self)
+            
+            # Remove from registered abilities set
+            if self in self._event_manager._registered_abilities:
+                self._event_manager._registered_abilities.remove(self)
+            
+            self._registered = False
+    
+    def should_trigger(self, event_context) -> bool:
+        """Override in subclasses to define when this ability triggers."""
+        return False
+    
+    def apply_effect(self, event_context) -> None:
+        """Override in subclasses to define the ability's effect."""
+        pass
+    
+    def __str__(self) -> str:
+        return f"TemporaryAbility({self.name})"
+
+
+class TemporaryAbilityListener:
+    """Lightweight listener that delegates to TemporaryAbility methods."""
+    
+    def __init__(self, temporary_ability: TemporaryAbility):
+        self.temporary_ability = temporary_ability
+    
+    def should_trigger(self, event_context) -> bool:
+        """Delegate to the temporary ability's should_trigger method."""
+        return (event_context.event_type == self.temporary_ability.expiration_trigger or 
+                self.temporary_ability.should_trigger(event_context))
+    
+    def relevant_events(self) -> List['GameEvent']:
+        """Get relevant events from the temporary ability."""
+        return self.temporary_ability.get_relevant_events()
+
+
+class TemporaryChallengerAbility(TemporaryAbility):
+    """Temporary ability that grants Challenger +X until expiration."""
+    
+    def __init__(self, strength_bonus: int, target: Any, expiration_trigger: 'GameEvent'):
+        """Initialize temporary Challenger ability.
+        
+        Args:
+            strength_bonus: Amount of strength bonus to grant during challenges
+            target: Character that has this temporary ability
+            expiration_trigger: GameEvent that causes this ability to expire
+        """
+        super().__init__(f"Challenger +{strength_bonus}", target, expiration_trigger)
+        self.strength_bonus = strength_bonus
+    
+    def get_ability_events(self) -> List['GameEvent']:
+        """Return events this challenger ability responds to."""
+        from ....engine.event_system import GameEvent
+        return [GameEvent.CHARACTER_CHALLENGES]
+    
+    def should_trigger(self, event_context) -> bool:
+        """Trigger when this character initiates a challenge."""
+        from ....engine.event_system import GameEvent
+        
+        # Only trigger on CHARACTER_CHALLENGES events where this character is the attacker
+        if event_context.event_type != GameEvent.CHARACTER_CHALLENGES:
+            return False
+        
+        # Check if this character is the one initiating the challenge
+        attacker = event_context.additional_data.get('attacker') if event_context.additional_data else None
+        return attacker is self.target
+    
+    def apply_effect(self, event_context) -> None:
+        """Apply the challenger bonus to combat calculation."""
+        if event_context.additional_data:
+            # Get the challenge context
+            challenge_context = event_context.additional_data.get('context', {})
+            
+            # Add our bonus to the attacker's strength for this challenge
+            if 'attacker' in challenge_context and challenge_context['attacker'] is self.target:
+                # Modify the damage calculation
+                current_damage = challenge_context.get('damage_to_defender', 0)
+                challenge_context['damage_to_defender'] = current_damage + self.strength_bonus
+                
+                # Also ensure the challenge result reflects this
+                challenge_result = event_context.additional_data.get('challenge_result', {})
+                if challenge_result and 'damage_to_defender' in challenge_result:
+                    challenge_result['damage_to_defender'] += self.strength_bonus
+    
+    def __str__(self) -> str:
+        return f"Challenger +{self.strength_bonus} (temporary)"
+
+
+# =============================================================================
 # ATOMIC EFFECTS FOR ALL EXISTING ABILITIES
 # =============================================================================
 
@@ -205,9 +371,7 @@ class StatModification(Effect):
         if target is None:
             return None
         
-        if hasattr(target, f'add_{self.stat}_bonus'):
-            getattr(target, f'add_{self.stat}_bonus')(self.amount, self.duration)
-        elif hasattr(target, f'modify_{self.stat}'):
+        if hasattr(target, f'modify_{self.stat}'):
             getattr(target, f'modify_{self.stat}')(self.amount)
         elif self.stat == "damage" and self.amount < 0:
             # Healing (negative damage)
@@ -313,6 +477,81 @@ class DrawCards(Effect):
     
     def __str__(self) -> str:
         return f"draw {self.count} card{'s' if self.count != 1 else ''}"
+
+
+class DamageEffect(Effect):
+    """Deal damage to a character."""
+    
+    def __init__(self, target, amount: int, source=None, damage_type: DamageType = DamageType.DIRECT):
+        self.target = target
+        self.amount = amount
+        self.source = source
+        self.damage_type = damage_type
+        self._actual_damage = 0
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Use the stored target, not the passed target
+        actual_target = self.target
+        
+        if not hasattr(actual_target, 'damage'):
+            logger.warning(f"Target {actual_target} cannot take damage")
+            return target
+        
+        # Get event manager from context
+        event_manager = context.get('event_manager')
+        if not event_manager:
+            # Fallback: apply damage directly without event
+            self._actual_damage = max(0, self.amount)
+            actual_target.damage += self._actual_damage
+            return target
+        
+        # Create damage event for modification
+        from ....engine.event_system import GameEvent, EventContext
+        damage_context = EventContext(
+            event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
+            target=actual_target,
+            source=self.source,
+            player=actual_target.controller if hasattr(actual_target, 'controller') else None,
+            game_state=context.get('game_state'),
+            additional_data={
+                'damage': self.amount,
+                'damage_type': self.damage_type,
+                'damage_source': self.source,
+                'modifiable': True
+            }
+        )
+        
+        # Trigger event - abilities like Resist can modify the damage
+        event_manager.trigger_event(damage_context)
+        
+        # Apply the potentially modified damage
+        final_damage = max(0, damage_context.additional_data.get('damage', self.amount))
+        self._actual_damage = final_damage
+        actual_target.damage += final_damage
+        
+        # Log damage application
+        logger.debug(f"{actual_target} took {final_damage} damage (from {self.amount})")
+        
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events for damage dealt."""
+        if self._actual_damage <= 0:
+            return []
+        
+        return [{
+            'type': GameEvent.DAMAGE_DEALT,
+            'source': self.source,
+            'target': self.target,
+            'additional_data': {
+                'damage_amount': self._actual_damage,
+                'damage_type': self.damage_type,
+                'ability_name': context.get('ability_name', 'Direct Damage')
+            }
+        }]
+    
+    def __str__(self) -> str:
+        return f"deal {self.amount} damage"
 
 
 class BanishCharacter(Effect):
@@ -859,6 +1098,41 @@ class PlayCharacterEffect(Effect):
         if success:
             self._player = player  # Store for event generation
             
+            # Queue dry ink effect for next ready phase of this player using event-triggered system
+            action_queue = context.get('action_queue')
+            if action_queue and hasattr(action_queue, 'enqueue_for_event'):
+                # Import here to avoid circular imports
+                from ....engine.action_queue import ActionPriority
+                from ....engine.event_system import GameEvent
+                
+                dry_effect = DryInkEffect(self.card)
+                
+                # Create a condition that checks if this is the correct player's ready phase
+                # We need to ensure this triggers only when the original player starts their next turn
+                def is_correct_players_ready_phase(event_context):
+                    context_player = getattr(event_context, 'player', None)
+                    game_state = getattr(event_context, 'game_state', None)
+                    
+                    # Must be the correct player
+                    if context_player != player:
+                        return False
+                    
+                    # Must be that player's turn (current_player)
+                    if game_state and game_state.current_player != player:
+                        return False
+                    
+                    return True
+                
+                action_queue.enqueue_for_event(
+                    effect=dry_effect,
+                    target=self.card,
+                    context=context,
+                    trigger_event=GameEvent.READY_PHASE,
+                    condition=is_correct_players_ready_phase,
+                    priority=ActionPriority.CLEANUP,
+                    source_description=f"{self.card.name}'s ink drying"
+                )
+            
             # Register the character's composable abilities with the event system
             # This must happen after playing but before events are emitted
             if hasattr(self.card, 'composable_abilities') and self.card.composable_abilities:
@@ -1014,6 +1288,14 @@ class QuestEffect(Effect):
             # Fallback to current player if no controller is set
             player = context.get('game_state').current_player
         
+        # Validate that the character can quest (check wet ink restriction)
+        game_state = context.get('game_state')
+        current_turn = game_state.turn_number if game_state else 0
+        
+        if not hasattr(self.character, 'can_quest') or not self.character.can_quest(current_turn):
+            # Character cannot quest (wet ink, exerted, or other restriction)
+            return target
+        
         if player and hasattr(self.character, 'current_lore'):
             self._player = player
             # Calculate lore gained (current_lore includes all bonuses from abilities)
@@ -1082,21 +1364,75 @@ class ChallengeEffect(Effect):
         player = self.attacker.controller if hasattr(self.attacker, 'controller') else context.get('player')
         self._player = player
         
-        # Apply challenge damage directly (matching ActionExecutor logic)
-        damage_to_defender = self.attacker.current_strength if hasattr(self.attacker, 'current_strength') else self.attacker.strength
-        damage_to_attacker = self.defender.current_strength if hasattr(self.defender, 'current_strength') else self.defender.strength
+        # Validate that the attacker can challenge (check wet ink restriction)
+        game_state = context.get('game_state')
+        current_turn = game_state.turn_number if game_state else 0
         
-        # Apply damage to both characters
-        self.defender.damage += damage_to_defender
-        self.attacker.damage += damage_to_attacker
+        if not hasattr(self.attacker, 'can_challenge') or not self.attacker.can_challenge(current_turn):
+            # Attacker cannot challenge (wet ink, exerted, or other restriction)
+            return target
         
-        # Store result for event generation (matching ActionExecutor data structure)
-        self._challenge_result = {
-            'attacker': self.attacker,
-            'defender': self.defender,
-            'damage_to_attacker': damage_to_attacker,
-            'damage_to_defender': damage_to_defender
-        }
+        # Exert the attacker
+        self.attacker.exerted = True
+        
+        # Mark character as having acted this turn
+        if game_state and hasattr(game_state, 'mark_character_acted'):
+            game_state.mark_character_acted(self.attacker.id)
+        
+        # Get action queue from context for queuing damage effects
+        action_queue = context.get('action_queue')
+        if not action_queue:
+            # Fallback: apply damage directly if no action queue available
+            damage_to_defender = self.attacker.current_strength if hasattr(self.attacker, 'current_strength') else self.attacker.strength
+            damage_to_attacker = self.defender.current_strength if hasattr(self.defender, 'current_strength') else self.defender.strength
+            
+            self.defender.damage += damage_to_defender
+            self.attacker.damage += damage_to_attacker
+            
+            self._challenge_result = {
+                'attacker': self.attacker,
+                'defender': self.defender,
+                'damage_to_attacker': damage_to_attacker,
+                'damage_to_defender': damage_to_defender
+            }
+        else:
+            # Queue damage effects for proper event handling
+            attacker_strength = self.attacker.current_strength if hasattr(self.attacker, 'current_strength') else self.attacker.strength
+            defender_strength = self.defender.current_strength if hasattr(self.defender, 'current_strength') else self.defender.strength
+            
+            # Queue damage to defender
+            if attacker_strength > 0:
+                damage_to_defender = DamageEffect(
+                    self.defender, attacker_strength, 
+                    source=self.attacker, damage_type=DamageType.CHALLENGE
+                )
+                from ....engine.action_queue import ActionPriority
+                action_queue.enqueue(
+                    damage_to_defender, 
+                    target=self.defender,
+                    context=context,
+                    priority=ActionPriority.HIGH
+                )
+            
+            # Queue damage to attacker
+            if defender_strength > 0:
+                damage_to_attacker = DamageEffect(
+                    self.attacker, defender_strength,
+                    source=self.defender, damage_type=DamageType.CHALLENGE
+                )
+                action_queue.enqueue(
+                    damage_to_attacker, 
+                    target=self.attacker,
+                    context=context,
+                    priority=ActionPriority.HIGH
+                )
+            
+            self._challenge_result = {
+                'attacker': self.attacker,
+                'defender': self.defender,
+                'damage_queued_to_attacker': defender_strength,
+                'damage_queued_to_defender': attacker_strength
+            }
         
         return target
     
@@ -1177,8 +1513,13 @@ class SingEffect(Effect):
 # AUTOMATIC GAME OPERATION EFFECTS (Phase 1 - TODO 9 Implementation)
 # =============================================================================
 
+# DealDamageEffect has been replaced by DamageEffect which provides better event handling
+# This class remains for backwards compatibility but should not be used in new code
 class DealDamageEffect(Effect):
-    """Effect for dealing damage to a character."""
+    """Effect for dealing damage to a character.
+    
+    DEPRECATED: Use DamageEffect instead for proper event handling and damage modification.
+    """
     
     def __init__(self, amount: int, source: Any = None):
         self.amount = amount
@@ -1186,6 +1527,8 @@ class DealDamageEffect(Effect):
         self._damage_dealt = None
     
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # For backwards compatibility, still use the old approach
+        # but recommend switching to DamageEffect
         if hasattr(target, 'take_damage'):
             self._damage_dealt = target.take_damage(self.amount)
         elif hasattr(target, 'damage'):
@@ -1283,6 +1626,49 @@ class PhaseProgressionEffect(Effect):
         return "progress to next phase"
 
 
+class DryInkEffect(Effect):
+    """Effect to dry a character's ink, making it ready to act."""
+    
+    def __init__(self, character):
+        self.character = character
+        self._dried = False
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        """Dry the character's ink if it's still alive."""
+        if self.character and hasattr(self.character, 'is_alive') and self.character.is_alive:
+            old_dry_status = getattr(self.character, 'is_dry', True)
+            self.character.is_dry = True
+            self._dried = not old_dry_status  # Only count as dried if it was previously wet
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get ink drying events."""
+        events = []
+        
+        if self._dried and self.character:
+            # Import here to avoid circular imports
+            from ....engine.event_system import GameEvent
+            
+            events.append({
+                'type': GameEvent.CHARACTER_READIED,
+                'target': self.character,
+                'source': None,
+                'player': getattr(self.character, 'controller', None),
+                'additional_data': {
+                    'character_name': getattr(self.character, 'name', 'Unknown'),
+                    'reason': 'ink_dried'
+                }
+            })
+        
+        return events
+    
+    def __str__(self) -> str:
+        if self.character:
+            char_name = getattr(self.character, 'name', 'Unknown')
+            return f"{char_name}'s ink dried"
+        return "character's ink dried"
+
+
 # =============================================================================
 # ADDITIONAL EFFECTS FOR ADVANCED ABILITIES
 # =============================================================================
@@ -1332,10 +1718,48 @@ class ChallengerEffect(Effect):
         self.duration = duration
     
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        # Apply challenger bonus with specified duration
-        if hasattr(target, 'add_challenger_bonus'):
-            target.add_challenger_bonus(self.strength_bonus, self.duration)
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        
+        # Create temporary challenger ability for event-driven expiration
+        expiration_event = self._get_expiration_event(self.duration)
+        temp_ability = TemporaryChallengerAbility(
+            self.strength_bonus, 
+            target, 
+            expiration_event
+        )
+        
+        # Add to target's abilities
+        if not hasattr(target, 'composable_abilities'):
+            target.composable_abilities = []
+        target.composable_abilities.append(temp_ability)
+        
+        # Register with event system if available
+        event_manager = context.get('event_manager')
+        game_state = context.get('game_state')
+        
+        # Try multiple ways to get event manager
+        if not event_manager and game_state:
+            event_manager = getattr(game_state, 'event_manager', None)
+        
+        if event_manager:
+            temp_ability.register_with_event_manager(event_manager)
+                
         return target
+    
+    def _get_expiration_event(self, duration: str):
+        """Map duration strings to GameEvent types."""
+        from ....engine.event_system import GameEvent
+        
+        if duration == "this_turn":
+            return GameEvent.TURN_ENDS
+        elif duration == "this_challenge":
+            return GameEvent.CHALLENGE_RESOLVED
+        elif duration == "end_of_turn":
+            return GameEvent.TURN_ENDS
+        else:
+            # Default to turn end for unknown durations
+            return GameEvent.TURN_ENDS
     
     def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
         """Get events for challenger activation."""
@@ -1349,12 +1773,16 @@ class ChallengerEffect(Effect):
             'player': target.controller if hasattr(target, 'controller') else context.get('player'),
             'additional_data': {
                 'strength_bonus': self.strength_bonus,
+                'duration': self.duration,
                 'ability_name': context.get('ability_name', 'Unknown')
             }
         }]
     
     def __str__(self) -> str:
-        return f"challenger +{self.strength_bonus}"
+        if self.duration == "permanent":
+            return f"challenger +{self.strength_bonus}"
+        else:
+            return f"challenger +{self.strength_bonus} ({self.duration})"
 
 
 class VanishEffect(Effect):

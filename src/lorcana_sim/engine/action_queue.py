@@ -38,6 +38,23 @@ class QueuedAction:
 
 
 @dataclass
+class ConditionalQueuedAction:
+    """Represents an action that waits for a specific event and condition."""
+    action_id: str
+    effect: Effect
+    target: Any
+    context: Dict[str, Any]
+    trigger_event: Any  # GameEvent that should trigger this action
+    condition: Optional[Callable] = None  # Function that takes event_context and returns bool
+    priority: ActionPriority = ActionPriority.NORMAL
+    source_description: str = ""
+    
+    def __post_init__(self):
+        if not self.action_id:
+            self.action_id = str(uuid.uuid4())
+
+
+@dataclass
 class ActionResult:
     """Result of executing an action."""
     action_id: str
@@ -58,6 +75,13 @@ class ActionQueue:
         self._execution_history: List[ActionResult] = []
         self._current_action: Optional[QueuedAction] = None
         self._waiting_actions: Dict[str, QueuedAction] = {}  # Actions waiting for choice resolution
+        
+        # Event-triggered effects: event -> [conditional_actions]
+        from collections import defaultdict
+        self._event_triggered_effects: Dict[Any, List[ConditionalQueuedAction]] = defaultdict(list)
+        
+        # Legacy phase-scheduled effects (deprecated, kept for backward compatibility)
+        self._phase_effects: Dict[str, Dict[Any, List[QueuedAction]]] = defaultdict(lambda: defaultdict(list))
         
     def enqueue(self, effect: Effect, target: Any, context: Dict[str, Any], 
                 priority: ActionPriority = ActionPriority.NORMAL,
@@ -120,6 +144,167 @@ class ActionQueue:
             
             action_id = self.enqueue(effect, target, context, priority, source_desc)
             action_ids.append(action_id)
+        
+        return action_ids
+    
+    def enqueue_for_event(self, effect: Effect, target: Any, context: Dict[str, Any],
+                          trigger_event: Any, condition: Optional[Callable] = None,
+                          priority: ActionPriority = ActionPriority.NORMAL,
+                          source_description: str = "") -> str:
+        """
+        Schedule an effect to execute when a specific event occurs, optionally with a condition.
+        
+        Args:
+            effect: The effect to execute
+            target: Target for the effect
+            context: Context for effect execution
+            trigger_event: Event that should trigger this effect (e.g., GameEvent.READY_PHASE)
+            condition: Optional function that takes event_context and returns bool
+            priority: Priority within the triggered effects
+            source_description: Human-readable description
+            
+        Returns:
+            The action ID for tracking
+        """
+        conditional_action = ConditionalQueuedAction(
+            action_id=str(uuid.uuid4()),
+            effect=effect,
+            target=target,
+            context=context,
+            trigger_event=trigger_event,
+            condition=condition,
+            priority=priority,
+            source_description=source_description
+        )
+        
+        self._event_triggered_effects[trigger_event].append(conditional_action)
+        
+        return conditional_action.action_id
+    
+    def process_event_triggers(self, event_context) -> List[str]:
+        """
+        Process all effects that should be triggered by this event.
+        
+        Args:
+            event_context: The event context containing event_type and other data
+            
+        Returns:
+            List of action IDs that were queued for execution
+        """
+        event_type = event_context.event_type
+        
+        if event_type not in self._event_triggered_effects:
+            return []
+        
+        conditional_actions = self._event_triggered_effects[event_type]
+        if not conditional_actions:
+            return []
+        
+        triggered_action_ids = []
+        actions_to_remove = []
+        
+        for i, conditional_action in enumerate(conditional_actions):
+            # Check condition if provided
+            should_trigger = True
+            if conditional_action.condition:
+                try:
+                    should_trigger = conditional_action.condition(event_context)
+                except Exception as e:
+                    logger.debug(f"Condition check failed for action {conditional_action.action_id}: {e}")
+                    should_trigger = False
+            
+            if should_trigger:
+                # Queue the effect for immediate execution
+                action_id = self.enqueue(
+                    effect=conditional_action.effect,
+                    target=conditional_action.target,
+                    context=conditional_action.context,
+                    priority=conditional_action.priority,
+                    source_description=f"[Event Triggered] {conditional_action.source_description}"
+                )
+                triggered_action_ids.append(action_id)
+                actions_to_remove.append(i)
+        
+        # Remove triggered actions (in reverse order to preserve indices)
+        for i in reversed(actions_to_remove):
+            del conditional_actions[i]
+        
+        return triggered_action_ids
+    
+    def enqueue_for_phase(self, effect: Effect, target: Any, context: Dict[str, Any],
+                         phase: str, player: Any,
+                         priority: ActionPriority = ActionPriority.CLEANUP,
+                         source_description: str = "") -> str:
+        """
+        Schedule an effect to execute during a specific phase for a specific player.
+        
+        Args:
+            effect: The effect to execute
+            target: Target for the effect
+            context: Context for effect execution
+            phase: Phase name (e.g., "ready", "draw", "play")
+            player: Player whose phase should trigger this effect
+            priority: Priority within the phase
+            source_description: Human-readable description
+            
+        Returns:
+            The action ID for tracking
+        """
+        action = QueuedAction(
+            action_id=str(uuid.uuid4()),
+            effect=effect,
+            target=target,
+            context=context,
+            priority=priority,
+            source_description=source_description
+        )
+        
+        # Store for execution during the specified phase (use player ID as key)
+        player_key = getattr(player, 'name', str(player))
+        self._phase_effects[phase][player_key].append(action)
+        
+        return action.action_id
+    
+    def execute_phase_effects(self, phase: str, player: Any) -> List[str]:
+        """
+        Execute all effects scheduled for a specific phase and player.
+        
+        Args:
+            phase: Phase name to execute effects for
+            player: Player whose phase is starting
+            
+        Returns:
+            List of action IDs that were queued for execution
+        """
+        # Use player ID/name as key
+        player_key = getattr(player, 'name', str(player))
+        
+        if phase not in self._phase_effects or player_key not in self._phase_effects[phase]:
+            return []
+        
+        # Get all effects for this phase and player
+        phase_actions = self._phase_effects[phase][player_key]
+        if not phase_actions:
+            return []
+        
+        # Sort by priority before queuing
+        phase_actions.sort(key=lambda a: a.priority.value)
+        
+        # Queue all effects for immediate execution
+        action_ids = []
+        for action in phase_actions:
+            # Re-queue with immediate priority to execute right away
+            action_id = self.enqueue(
+                effect=action.effect,
+                target=action.target,
+                context=action.context,
+                priority=ActionPriority.HIGH,  # Execute before normal actions
+                source_description=f"[{phase} phase] {action.source_description}"
+            )
+            action_ids.append(action_id)
+        
+        # Clear the phase effects for this player
+        self._phase_effects[phase][player_key].clear()
         
         return action_ids
     

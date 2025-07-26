@@ -444,8 +444,18 @@ class TestChallengerIntegration:
             if not result:
                 break
         
-        # Character should have received strength bonus
-        assert challenger_char.current_strength == initial_strength + 2
+        # Character should have received temporary challenger ability from ChallengerEffect
+        from lorcana_sim.models.abilities.composable.effects import TemporaryChallengerAbility
+        temp_challenger_abilities = [ability for ability in challenger_char.composable_abilities 
+                                   if isinstance(ability, TemporaryChallengerAbility)]
+        assert len(temp_challenger_abilities) > 0, "Character should have temporary challenger ability"
+        
+        # Temporary challenger ability should grant +2 strength bonus
+        temp_challenger_ability = temp_challenger_abilities[0]
+        assert temp_challenger_ability.strength_bonus == 2, "Temporary challenger ability should grant +2 strength bonus"
+        
+        # Base strength should remain unchanged (challenger bonus applies during combat)
+        assert challenger_char.current_strength == initial_strength, "Base strength should not be affected by challenger ability"
 
 
 # =============================================================================
@@ -731,7 +741,18 @@ class TestMultiAbilityIntegration:
             if not result:
                 break
         
-        assert character.current_strength == 3  # 1 + 2 challenger bonus
+        # Character should have received temporary challenger ability from ChallengerEffect
+        from lorcana_sim.models.abilities.composable.effects import TemporaryChallengerAbility
+        temp_challenger_abilities = [ability for ability in character.composable_abilities 
+                                   if isinstance(ability, TemporaryChallengerAbility)]
+        assert len(temp_challenger_abilities) > 0, "Character should have temporary challenger ability"
+        
+        # Temporary challenger ability should grant +2 strength bonus
+        temp_challenger_ability = temp_challenger_abilities[0]
+        assert temp_challenger_ability.strength_bonus == 2, "Temporary challenger ability should grant +2 strength bonus"
+        
+        # Base strength should remain unchanged (challenger bonus applies during combat)
+        assert character.current_strength == 1, "Base strength should not be affected by challenger ability"
 
 
 # =============================================================================

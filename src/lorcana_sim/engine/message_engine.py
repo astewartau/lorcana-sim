@@ -347,6 +347,22 @@ class MessageEngine:
         """Queue individual ready phase effects instead of bundled PhaseProgressionEffect."""
         from ..models.abilities.composable.effects import PhaseProgressionEffect
         from .action_queue import ActionPriority
+        from .event_system import GameEvent, EventContext
+        
+        # CRITICAL: Trigger READY_PHASE event first so abilities can trigger
+        # This must happen before the ready step mechanics
+        ready_phase_context = EventContext(
+            event_type=GameEvent.READY_PHASE,
+            player=self.game_state.current_player,
+            game_state=self.game_state,
+            additional_data={'phase': 'ready'},
+            action_queue=self.execution_engine.action_queue if self.execution_engine else None
+        )
+        if hasattr(self, 'execution_engine') and self.execution_engine:
+            from ..engine.event_system import GameEventManager
+            event_manager = getattr(self.execution_engine, 'event_manager', None)
+            if event_manager:
+                event_manager.trigger_event(ready_phase_context)
         
         # Get ready step events from phase management (this also executes the ready logic)
         ready_events = self.game_state._phase_management.ready_step(self.game_state)

@@ -19,5 +19,5 @@ def create_heavily_armed(character: Any, ability_data: dict):
         character,
         when_card_drawn(character),  # Pass character instead of character.controller for late binding
         SELF,
-        ChallengerEffect(1)
+        ChallengerEffect(1, "this_turn")  # Fix: Challenger +1 this turn, not permanent
     )

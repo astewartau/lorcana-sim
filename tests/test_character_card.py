@@ -122,6 +122,9 @@ def test_character_exert_ready():
         strength=3, willpower=3, lore=2
     )
     
+    # Set to dry ink so we can test exert/ready mechanics properly
+    card.is_dry = True
+    
     # Initially ready
     assert card.exerted is False
     assert card.can_quest(1) is True

@@ -38,8 +38,8 @@ class PhaseManagementComponent:
         if game_state.current_player_index == 0:
             game_state.turn_number += 1
         
-        # Update character dry status after turn changes (but not for current player - they'll update in ready phase)
-        self._update_character_dry_status_except_current(game_state)
+        # NOTE: Ink drying is now handled by event-driven DryInkEffect scheduled during character play.
+        # No need to manually update dry status - it's handled during each player's ready phase.
         
         # Start ready phase for new player (but don't execute ready_step yet)
         from ..game_state import Phase
@@ -60,24 +60,9 @@ class PhaseManagementComponent:
         # Get list of exerted characters before readying
         exerted_characters = [char for char in current_player.characters_in_play if char.exerted]
         
-        # Update dry status for current player's characters (happens during ready phase)
-        for char in current_player.characters_in_play:
-            if char.turn_played is not None:
-                # Ink dries at start of owner's next turn
-                old_dry_status = char.is_dry
-                char.is_dry = game_state.turn_number > char.turn_played
-                # Track characters that just dried
-                if not old_dry_status and char.is_dry and not char.exerted:
-                    readied_items.append({
-                        'event': GameEvent.CHARACTER_READIED,
-                        'context': {
-                            'character_name': char.name,
-                            'reason': 'ink_dried'
-                        }
-                    })
-            else:
-                # Character wasn't played this game (already dry)
-                char.is_dry = True
+        # NOTE: Ink drying is now handled by event-driven DryInkEffect scheduled during character play.
+        # Characters start with wet ink (is_dry=False) and DryInkEffect sets is_dry=True during ready phase.
+        # This replaces the old turn_played calculation system for better testability and visibility.
         
         # Start the turn (reset ink usage, ready characters)
         current_player.start_turn()
@@ -203,12 +188,5 @@ class PhaseManagementComponent:
         
         return draw_events
     
-    def _update_character_dry_status_except_current(self, game_state: "GameState") -> None:
-        """Update dry status for all characters except current player (they update during ready phase)."""
-        current_player = game_state.current_player
-        for player in game_state.players:
-            if player != current_player:
-                for char in player.characters_in_play:
-                    if char.turn_played is None:
-                        # Character wasn't played this game (already dry)
-                        char.is_dry = True
+    # NOTE: _update_character_dry_status_except_current method removed.
+    # Ink drying is now handled by event-driven DryInkEffect system.

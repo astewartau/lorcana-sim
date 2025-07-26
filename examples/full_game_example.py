@@ -17,7 +17,6 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.lorcana_sim.models.game.game_state import GameState, Phase, GameResult
 from src.lorcana_sim.engine.event_system import GameEvent
 from src.lorcana_sim.engine.game_engine import GameEngine
-from src.lorcana_sim.engine.game_engine import ExecutionMode
 from src.lorcana_sim.engine.game_messages import (
     MessageType, ActionRequiredMessage, ChoiceRequiredMessage, 
     StepExecutedMessage, GameOverMessage
@@ -975,7 +974,7 @@ def simulate_random_game():
     print("=" * 50)
     
     game_state = setup_game()
-    engine = GameEngine(game_state, ExecutionMode.PAUSE_ON_INPUT)
+    engine = GameEngine(game_state)
     
     # Start the game
     engine.start_game()

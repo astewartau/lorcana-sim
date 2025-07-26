@@ -23,25 +23,10 @@ class MockCharacter:
         self.metadata = {}
         self.abilities = []
         
-        # Track bonuses for testing
-        self.lore_bonuses = []
-        self.strength_bonuses = []
-        self.willpower_bonuses = []
+        # Temporary abilities for new system
+        self.composable_abilities = []
     
-    def add_lore_bonus(self, amount, duration):
-        self.lore_bonuses.append((amount, duration))
-        if duration == "permanent":
-            self.lore += amount
-    
-    def add_strength_bonus(self, amount, duration):
-        self.strength_bonuses.append((amount, duration))
-        if duration == "permanent":
-            self.strength += amount
-    
-    def add_willpower_bonus(self, amount, duration):
-        self.willpower_bonuses.append((amount, duration))
-        if duration == "permanent":
-            self.willpower += amount
+    # Legacy bonus methods removed - StatModification now uses direct modification
     
     def modify_damage(self, amount):
         self.damage += amount
@@ -121,7 +106,8 @@ class TestEffectSystem:
         
         effect.apply(character, {})
         
-        assert character.lore_bonuses == [(2, "this_turn")]
+        # StatModification now uses direct modification as fallback
+        assert character.lore == 2
     
     def test_effect_addition(self):
         """Test combining effects with +"""
@@ -132,8 +118,9 @@ class TestEffectSystem:
         combined = effect1 + effect2
         combined.apply(character, {})
         
-        assert character.lore_bonuses == [(2, "this_turn")]
-        assert character.strength_bonuses == [(1, "permanent")]
+        # StatModification now uses direct modification as fallback
+        assert character.lore == 2
+        assert character.strength == 1
     
     def test_effect_multiplication(self):
         """Test repeating effects with *"""
@@ -297,9 +284,8 @@ class TestComposableAbilities:
             if not result:
                 break
         
-        # Verify
-        assert len(target_char.lore_bonuses) == 1
-        assert target_char.lore_bonuses[0] == (2, "this_turn")
+        # Verify - StatModification now uses direct modification
+        assert target_char.lore == 2
     
     def test_fluent_interface(self):
         """Test the fluent interface for building abilities."""
@@ -365,9 +351,9 @@ class TestComposableAbilities:
             if not result:
                 break
         
-        # Verify both effects applied
-        assert target_char.lore_bonuses == [(1, "this_turn")]
-        assert target_char.strength_bonuses == [(2, "this_turn")]
+        # Verify both effects applied - StatModification now uses direct modification
+        assert target_char.lore == 1
+        assert target_char.strength == 2
 
 
 # =============================================================================

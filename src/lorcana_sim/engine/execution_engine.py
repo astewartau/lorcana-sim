@@ -8,7 +8,6 @@ from ..models.cards.action_card import ActionCard
 from ..models.cards.item_card import ItemCard
 from .move_validator import MoveValidator
 from .event_system import GameEventManager, GameEvent
-from .damage_calculator import DamageCalculator
 from .choice_system import GameChoiceManager
 from .action_result import ActionResult
 # NOTE: Step system imports removed in Phase 4
@@ -30,18 +29,17 @@ class ExecutionEngine:
     Combines action execution, step progression, and conditional effects.
     """
     
-    def __init__(self, game_state, validator, event_manager, damage_calculator, choice_manager, execution_mode):
+    def __init__(self, game_state, validator, event_manager, choice_manager):
         self.game_state = game_state
         self.validator = validator
         self.event_manager = event_manager
-        self.damage_calculator = damage_calculator
         self.choice_manager = choice_manager
         
         # Execution components
         # NOTE: step_engine removed in Phase 4
         self.action_queue = ActionQueue(event_manager)
         self.action_executor = ActionExecutor(
-            game_state, validator, event_manager, damage_calculator, choice_manager, self.action_queue
+            game_state, validator, event_manager, choice_manager, self.action_queue
         )
         # NOTE: current_action_steps removed in Phase 4
         
@@ -149,11 +147,9 @@ class ExecutionEngine:
             
             return action_id
             
-        # NOTE: ActionMove support REMOVED in Phase 4
         
         raise ValueError(f"Cannot process move type: {type(move)}")
 
-    # NOTE: process_move_as_steps REMOVED in Phase 4 - use process_move instead
     
     def execute_next_effect(self) -> Optional[Any]:
         """Execute the next effect from the action queue.
@@ -196,7 +192,6 @@ class ExecutionEngine:
         """Check if there are effects waiting to be executed."""
         return self.action_queue.has_pending_actions()
 
-    # NOTE: execute_next_step REMOVED in Phase 4 - use execute_next_effect instead
     
     def evaluate_conditional_effects(self, trigger_context) -> List[Dict]:
         """Evaluate and trigger conditional effects."""
@@ -261,15 +256,6 @@ class ExecutionEngine:
         return result
         
     
-    # NOTE: _convert_to_action_move REMOVED in Phase 4
-    
-    # NOTE: _convert_action_move_to_effect REMOVED in Phase 4
-    
-    # NOTE: _create_action_steps REMOVED in Phase 4
-    
-    # NOTE: _create_choice_steps REMOVED in Phase 4
-    
-    # NOTE: _execute_next_step REMOVED in Phase 4
     
     def _evaluate_conditional_effects_before_step(self) -> List[Dict]:
         """Evaluate conditional effects before a step is executed."""

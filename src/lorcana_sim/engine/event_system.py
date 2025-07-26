@@ -302,6 +302,12 @@ class GameEventManager:
                 # Don't generate immediate messages - let the action queue handle messaging
                 # when effects are actually executed
         
+        # Process event-triggered effects from ActionQueue
+        if hasattr(event_context, 'action_queue') and event_context.action_queue:
+            triggered_ids = event_context.action_queue.process_event_triggers(event_context)
+            if triggered_ids:
+                results.append(f"Triggered {len(triggered_ids)} event-based effects")
+        
         # Evaluate passive abilities after event processing
         passive_results = self._evaluate_passive_abilities()
         results.extend(passive_results)

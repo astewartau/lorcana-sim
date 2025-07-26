@@ -98,6 +98,9 @@ def test_character_cards_have_combat_stats(card_database):
         assert card.willpower > 0  # Characters must have at least 1 willpower
         assert card.lore >= 0
         
+        # Set to dry ink to test basic character actions (not testing wet ink here)
+        card.is_dry = True
+        
         # Should be able to perform character actions
         assert card.can_quest(1) is True  # Initially ready
         assert card.can_challenge(1) is True  # Initially ready

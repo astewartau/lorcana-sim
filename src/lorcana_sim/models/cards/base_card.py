@@ -53,6 +53,7 @@ class Card:
     
     # Visual (optional for simulation)
     artists: List[str] = field(default_factory=list)
+    image_url: Optional[str] = None
     
     # Game State
     exerted: bool = False  # Whether the card is exerted (used for ink cards and characters)

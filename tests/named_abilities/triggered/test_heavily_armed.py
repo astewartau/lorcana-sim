@@ -81,9 +81,10 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         dummy_card = self.create_test_character(name="Dummy Card")
         self.player1.deck = [dummy_card]
         
-        # Record initial strength and challenger status
+        # Record initial strength and challenger abilities
         initial_strength = armed_character.current_strength
-        initial_challenger_bonus = getattr(armed_character, 'challenger_bonus', 0)
+        initial_challenger_abilities = len([ability for ability in armed_character.composable_abilities 
+                                          if 'Challenger' in ability.name])
         
         # Simulate a card draw (this could be from draw phase, ability, etc.)
         # For testing, we'll manually trigger the draw and event
@@ -116,9 +117,11 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Verify character gained Challenger +1 for the turn
-        # The exact implementation may vary, but the character should have enhanced challenging ability
-        # Check for strength bonuses added by the Challenger effect
-        assert hasattr(armed_character, 'strength_bonuses') and len(armed_character.strength_bonuses) > 0
+        # Check for temporary challenger abilities created by the ChallengerEffect
+        challenger_abilities = [ability for ability in armed_character.composable_abilities 
+                              if 'Challenger' in ability.name]
+        assert len(challenger_abilities) > 0, "Should have temporary challenger ability"
+        assert challenger_abilities[0].strength_bonus == 1, "Should have Challenger +1"
     
     def test_heavily_armed_triggers_on_action_card_draw(self):
         """Test HEAVILY ARMED when player draws cards (simulating action card effect)."""
@@ -145,8 +148,9 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         dummy_card = self.create_test_character(name="Dummy Card")
         self.player1.deck = [dummy_card]
         
-        # Record initial strength and challenger status
-        initial_strength_bonuses = len(getattr(armed_character, 'strength_bonuses', []))
+        # Record initial challenger abilities count
+        initial_challenger_abilities = len([ability for ability in armed_character.composable_abilities 
+                                          if 'Challenger' in ability.name])
         
         # Simulate a card draw (this could be from an action card effect)
         drawn_card = self.player1.deck.pop(0)
@@ -174,7 +178,9 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Verify character gained Challenger +1 for the turn
-        assert hasattr(armed_character, 'strength_bonuses') and len(armed_character.strength_bonuses) > initial_strength_bonuses
+        challenger_abilities = [ability for ability in armed_character.composable_abilities 
+                              if 'Challenger' in ability.name]
+        assert len(challenger_abilities) > initial_challenger_abilities, "Should have gained a challenger ability"
     
     def test_heavily_armed_multiple_draws_multiple_triggers(self):
         """Test HEAVILY ARMED triggers multiple times when multiple cards are drawn."""
@@ -253,8 +259,9 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         dummy_card = self.create_test_character(name="Opponent Dummy")
         self.player2.deck = [dummy_card]
         
-        # Record initial challenger status
-        initial_challenger_bonus = getattr(armed_character, 'challenger_bonus', 0)
+        # Record initial challenger abilities count
+        initial_challenger_abilities = len([ability for ability in armed_character.composable_abilities 
+                                          if 'Challenger' in ability.name])
         
         # Opponent draws a card
         drawn_card = self.player2.deck.pop(0)
@@ -273,9 +280,10 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         self.game_engine.execution_engine.event_manager.trigger_event(draw_context)
         
         # HEAVILY ARMED should NOT trigger for opponent's draw
-        # Character should retain original challenger status
-        current_challenger_bonus = getattr(armed_character, 'challenger_bonus', 0)
-        assert current_challenger_bonus == initial_challenger_bonus
+        # Character should retain original challenger abilities count
+        current_challenger_abilities = len([ability for ability in armed_character.composable_abilities 
+                                          if 'Challenger' in ability.name])
+        assert current_challenger_abilities == initial_challenger_abilities
     
     def test_heavily_armed_effect_duration(self):
         """Test that HEAVILY ARMED Challenger bonus lasts for the turn."""
@@ -326,7 +334,9 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         assert effect_message.type == MessageType.STEP_EXECUTED
         
         # Verify character gained Challenger bonus
-        assert hasattr(armed_character, 'strength_bonuses') and len(armed_character.strength_bonuses) > 0
+        challenger_abilities = [ability for ability in armed_character.composable_abilities 
+                              if 'Challenger' in ability.name]
+        assert len(challenger_abilities) > 0, "Should have challenger ability"
         
         # Verify effect is applied
         # The exact verification depends on how temporary effects are implemented
@@ -410,9 +420,13 @@ class TestHeavilyArmedIntegration(GameEngineTestBase):
         assert len(trigger_messages) == 2
         assert len(effect_messages) == 2
         
-        # Verify both characters gained Challenger bonuses
-        assert hasattr(armed_character1, 'strength_bonuses') and len(armed_character1.strength_bonuses) > 0
-        assert hasattr(armed_character2, 'strength_bonuses') and len(armed_character2.strength_bonuses) > 0
+        # Verify both characters gained Challenger abilities
+        challenger_abilities1 = [ability for ability in armed_character1.composable_abilities 
+                               if 'Challenger' in ability.name]
+        challenger_abilities2 = [ability for ability in armed_character2.composable_abilities 
+                               if 'Challenger' in ability.name]
+        assert len(challenger_abilities1) > 0, "First character should have challenger ability"
+        assert len(challenger_abilities2) > 0, "Second character should have challenger ability"
 
 
 if __name__ == "__main__":

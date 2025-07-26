@@ -55,6 +55,11 @@ class CardFactory:
         except ValueError:
             raise ValueError(f"Unknown card color: {color_str}")
         
+        # Extract full image URL if available
+        image_url = None
+        if "images" in card_data and isinstance(card_data["images"], dict):
+            image_url = card_data["images"].get("full")
+        
         return {
             "id": card_data["id"],
             "name": card_data["name"],
@@ -69,7 +74,8 @@ class CardFactory:
             "story": card_data["story"],
             "flavor_text": card_data.get("flavorText"),
             "full_text": card_data.get("fullText", ""),
-            "artists": card_data.get("artists", [])
+            "artists": card_data.get("artists", []),
+            "image_url": image_url
         }
     
     @staticmethod

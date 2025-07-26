@@ -33,6 +33,7 @@ class CardData:
     willpower: Optional[int] = None
     lore: Optional[int] = None
     subtypes: Optional[List[str]] = None
+    image_url: Optional[str] = None
 
 
 class CardDatabase:
@@ -69,6 +70,11 @@ class CardDatabase:
     
     def _parse_card_data(self, data: dict) -> CardData:
         """Parse raw JSON data into CardData."""
+        # Extract full image URL if available
+        image_url = None
+        if "images" in data and isinstance(data["images"], dict):
+            image_url = data["images"].get("full")
+        
         return CardData(
             id=data.get('id', 0),
             name=data.get('name', ''),
@@ -86,7 +92,8 @@ class CardDatabase:
             strength=data.get('strength'),
             willpower=data.get('willpower'),
             lore=data.get('lore'),
-            subtypes=data.get('subtypes', [])
+            subtypes=data.get('subtypes', []),
+            image_url=image_url
         )
     
     def find_card(self, nickname: str) -> Optional[CardData]:
@@ -149,7 +156,8 @@ class CardDatabase:
                 strength=card_data.strength if card_data.strength is not None else 1,
                 willpower=card_data.willpower if card_data.willpower is not None else 1,
                 lore=card_data.lore if card_data.lore is not None else 1,
-                subtypes=card_data.subtypes or []
+                subtypes=card_data.subtypes or [],
+                image_url=card_data.image_url
             )
             
             # Add composable abilities (both keyword and named)
@@ -184,6 +192,7 @@ class CardDatabase:
                 set_code=card_data.set_code,
                 number=card_data.number,
                 story=card_data.story,
+                image_url=card_data.image_url
             )
         
         else:  # Item or other
@@ -199,6 +208,7 @@ class CardDatabase:
                 set_code=card_data.set_code,
                 number=card_data.number,
                 story=card_data.story,
+                image_url=card_data.image_url
             )
     
     def _create_composable_abilities(self, character, abilities_data: List[dict]) -> List:

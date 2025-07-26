@@ -6,7 +6,6 @@ from typing import List, Optional, TYPE_CHECKING, Dict, Any, Tuple
 from .base_card import Card
 
 if TYPE_CHECKING:
-    from ...engine.damage_calculator import DamageCalculator, DamageType
     from ..game.game_state import GameState
     from ...engine.event_system import GameEventManager
     from ..abilities.composable import ComposableAbility
@@ -29,9 +28,8 @@ class CharacterCard(Card):
     # Runtime State (not from JSON - game state)
     damage: int = 0
     exerted: bool = False
-    is_dry: bool = True  # Ink drying status - True means ready to act
+    is_dry: bool = False  # Ink drying status - False means wet ink (can't act), True means dry (can act)
     location: Optional[str] = None
-    turn_played: Optional[int] = None  # Track when character was played for ink drying
     
     def __setattr__(self, name, value):
         if name == 'damage' and hasattr(self, 'damage'):
@@ -46,11 +44,6 @@ class CharacterCard(Card):
     controller: Optional['Player'] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     
-    # Stat Bonus Tracking (for abilities like Support)
-    lore_bonuses: List[Tuple[int, str]] = field(default_factory=list)
-    strength_bonuses: List[Tuple[int, str]] = field(default_factory=list)
-    willpower_bonuses: List[Tuple[int, str]] = field(default_factory=list)
-    challenger_bonuses: List[Tuple[int, str]] = field(default_factory=list)
     
     def __post_init__(self) -> None:
         """Validate character card data after creation."""
@@ -73,35 +66,18 @@ class CharacterCard(Card):
     @property
     def current_strength(self) -> int:
         """Get current strength including ability modifiers."""
-        base = self.strength
-        # Add bonuses
-        for amount, duration in self.strength_bonuses:
-            base += amount
-        return max(0, base)
+        return max(0, self.strength)
     
     @property
     def current_willpower(self) -> int:
         """Get current willpower including ability modifiers and damage."""
-        base = self.willpower
-        # Add bonuses  
-        for amount, duration in self.willpower_bonuses:
-            base += amount
-        # Subtract damage
-        return base - self.damage
+        return self.willpower - self.damage
     
     @property
     def current_lore(self) -> int:
         """Get current lore value including ability modifiers."""
-        base = self.lore
-        # Add bonuses
-        for amount, duration in self.lore_bonuses:
-            base += amount
-        return max(0, base)
+        return max(0, self.lore)
     
-    @property
-    def current_challenger_bonus(self) -> int:
-        """Get current challenger bonus."""
-        return sum(amount for amount, duration in self.challenger_bonuses)
     
     def deal_damage(self, 
                    amount: int, 
@@ -125,15 +101,10 @@ class CharacterCard(Card):
         if amount == 0:
             return 0
         
-        # If no damage calculator provided, use simple damage
-        if damage_calculator is None or damage_type is None:
-            self.damage += amount
-            return amount
-        
-        # Calculate final damage with ability modifications
-        final_damage = damage_calculator.calculate_damage(source, self, amount, damage_type)
-        
-        # Apply the calculated damage
+        # Note: This method is now primarily for backwards compatibility.
+        # New code should use DamageEffect for proper event handling and damage modification.
+        # Apply damage directly - modifications happen through events
+        final_damage = max(0, amount)
         self.damage += final_damage
         
         return final_damage
@@ -218,35 +189,9 @@ class CharacterCard(Card):
         """Use the same representation as __str__ for cleaner output in collections."""
         return self.__str__()
     
-    # Stat Bonus Management Methods
-    def add_lore_bonus(self, amount: int, duration: str) -> None:
-        """Add a lore bonus to this character."""
-        self.lore_bonuses.append((amount, duration))
-    
-    def add_strength_bonus(self, amount: int, duration: str) -> None:
-        """Add a strength bonus to this character.""" 
-        self.strength_bonuses.append((amount, duration))
-    
-    def add_willpower_bonus(self, amount: int, duration: str) -> None:
-        """Add a willpower bonus to this character."""
-        self.willpower_bonuses.append((amount, duration))
-    
-    def add_challenger_bonus(self, amount: int, duration: str) -> None:
-        """Add a challenger bonus to this character."""
-        self.challenger_bonuses.append((amount, duration))
     
     def add_temporary_modifier(self, **kwargs) -> None:
         """Add temporary modifiers to this character."""
-        duration = kwargs.get('duration', 'turn')
-        
-        if 'strength' in kwargs:
-            self.add_strength_bonus(kwargs['strength'], duration)
-        if 'willpower' in kwargs:
-            self.add_willpower_bonus(kwargs['willpower'], duration)
-        if 'lore' in kwargs:
-            self.add_lore_bonus(kwargs['lore'], duration)
-        if 'challenger_bonus' in kwargs:
-            self.add_challenger_bonus(kwargs['challenger_bonus'], duration)
         if 'evasive' in kwargs:
             self.metadata['has_evasive'] = kwargs['evasive']
         if 'rush' in kwargs:
@@ -256,66 +201,6 @@ class CharacterCard(Card):
         if 'ward' in kwargs:
             self.metadata['has_ward'] = kwargs['ward']
     
-    def clear_temporary_bonuses(self, game_state=None) -> List[Dict]:
-        """Clear all 'this_turn' bonuses at end of turn and return list of expired effects."""
-        expired_effects = []
-        
-        # Track what we're removing for messaging - aggregate same bonus types
-        challenger_total = 0
-        for amount, duration in self.challenger_bonuses:
-            if duration in ["this_turn", "turn"]:
-                challenger_total += amount
-        
-        if challenger_total > 0:
-            expired_effects.append({
-                'type': 'EFFECT_EXPIRED',
-                'target': self.name,
-                'effect_type': 'challenger_bonus',
-                'effect_value': challenger_total,
-                'reason': 'end of turn',
-                'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0) if game_state else 0
-            })
-        
-        for amount, duration in self.strength_bonuses:
-            if duration in ["this_turn", "turn"]:
-                expired_effects.append({
-                    'type': 'EFFECT_EXPIRED',
-                    'target': self.name,
-                    'effect_type': 'strength_bonus',
-                    'effect_value': amount,
-                    'reason': 'end of turn',
-                    'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0) if game_state else 0
-                })
-        
-        for amount, duration in self.willpower_bonuses:
-            if duration in ["this_turn", "turn"]:
-                expired_effects.append({
-                    'type': 'EFFECT_EXPIRED',
-                    'target': self.name,
-                    'effect_type': 'willpower_bonus',
-                    'effect_value': amount,
-                    'reason': 'end of turn',
-                    'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0) if game_state else 0
-                })
-                
-        for amount, duration in self.lore_bonuses:
-            if duration in ["this_turn", "turn"]:
-                expired_effects.append({
-                    'type': 'EFFECT_EXPIRED',
-                    'target': self.name,
-                    'effect_type': 'lore_bonus',
-                    'effect_value': amount,
-                    'reason': 'end of turn',
-                    'timestamp': getattr(game_state, 'turn_number', 0) * 1000 + getattr(game_state, '_event_counter', 0) if game_state else 0
-                })
-        
-        # Actually remove the temporary bonuses
-        self.lore_bonuses = [(amount, duration) for amount, duration in self.lore_bonuses if duration not in ["this_turn", "turn"]]
-        self.strength_bonuses = [(amount, duration) for amount, duration in self.strength_bonuses if duration not in ["this_turn", "turn"]]
-        self.willpower_bonuses = [(amount, duration) for amount, duration in self.willpower_bonuses if duration not in ["this_turn", "turn"]]
-        self.challenger_bonuses = [(amount, duration) for amount, duration in self.challenger_bonuses if duration not in ["this_turn", "turn"]]
-        
-        return expired_effects
     
     # Composable Ability Integration Methods
     def register_composable_abilities(self, event_manager: 'GameEventManager') -> None:

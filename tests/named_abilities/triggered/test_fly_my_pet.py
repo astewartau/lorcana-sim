@@ -57,7 +57,9 @@ class TestFlyMyPetIntegration(GameEngineTestBase):
         self.play_character(pet_character, player=self.player1)
         self.play_character(attacker, player=self.player2)
         
-        # Set up for challenge
+        # Set up for challenge - ensure dry ink so they can participate in combat
+        pet_character.is_dry = True
+        attacker.is_dry = True
         pet_character.exerted = True    # Exerted = challengeable
         attacker.exerted = False       # Ready to challenge
         
@@ -70,31 +72,25 @@ class TestFlyMyPetIntegration(GameEngineTestBase):
         
         # Challenge the pet character
         challenge_move = ChallengeMove(attacker, pet_character)
-        challenge_message = self.game_engine.next_message(challenge_move)
+        self.game_engine.next_message(challenge_move)
         
-        # Verify challenge occurred
-        assert challenge_message.type == MessageType.STEP_EXECUTED
-        # Verify challenge action occurred
-        assert challenge_message.type == MessageType.STEP_EXECUTED
-        
-        # Process combat resolution
-        combat_message = self.game_engine.next_message()
-        assert combat_message.type == MessageType.STEP_EXECUTED
+        # Process all effects until we get a choice or action required
+        choice_message = None
+        while True:
+            msg = self.game_engine.next_message()
+            if msg.type == MessageType.CHOICE_REQUIRED:
+                choice_message = msg
+                break
+            elif msg.type == MessageType.ACTION_REQUIRED:
+                # If we get ACTION_REQUIRED, the test failed - pet should trigger choice
+                pytest.fail(f"Expected CHOICE_REQUIRED but got ACTION_REQUIRED. Pet banishment might not have triggered FLY, MY PET!")
         
         # Pet should be banished (willpower 1 vs strength 2)
         assert pet_character not in self.player1.characters_in_play
         assert pet_character in self.player1.discard_pile
         
-        # Get the FLY, MY PET! trigger message
-        trigger_message = self.game_engine.next_message()
-        assert trigger_message.type == MessageType.STEP_EXECUTED
-        # Check that message has event data about the ability trigger
-        assert trigger_message.event_data is not None or trigger_message.step is not None
-        
-        # Should get a choice message asking if player wants to draw
-        choice_message = self.game_engine.next_message()
-        assert choice_message.type == MessageType.CHOICE_REQUIRED
-        # Verify choice message
+        # Verify we got the choice message for FLY, MY PET!
+        assert choice_message is not None
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose to draw the card
@@ -128,7 +124,9 @@ class TestFlyMyPetIntegration(GameEngineTestBase):
         self.play_character(pet_character, player=self.player1)
         self.play_character(attacker, player=self.player2)
         
-        # Set up for challenge
+        # Set up for challenge - ensure dry ink so they can participate in combat
+        pet_character.is_dry = True
+        attacker.is_dry = True
         pet_character.exerted = True
         attacker.exerted = False
         
@@ -140,20 +138,24 @@ class TestFlyMyPetIntegration(GameEngineTestBase):
         
         # Challenge to banish pet
         challenge_move = ChallengeMove(attacker, pet_character)
-        challenge_message = self.game_engine.next_message(challenge_move)
+        self.game_engine.next_message(challenge_move)
         
-        # Process combat
-        combat_message = self.game_engine.next_message()
+        # Process all effects until we get a choice or action required
+        choice_message = None
+        while True:
+            msg = self.game_engine.next_message()
+            if msg.type == MessageType.CHOICE_REQUIRED:
+                choice_message = msg
+                break
+            elif msg.type == MessageType.ACTION_REQUIRED:
+                # If we get ACTION_REQUIRED, the test failed - pet should trigger choice
+                pytest.fail(f"Expected CHOICE_REQUIRED but got ACTION_REQUIRED. Pet banishment might not have triggered FLY, MY PET!")
         
         # Verify banishment
         assert pet_character not in self.player1.characters_in_play
         
-        # Get trigger and choice messages
-        trigger_message = self.game_engine.next_message()
-        # Check that message has event data about the ability trigger
-        assert trigger_message.event_data is not None or trigger_message.step is not None
-        
-        choice_message = self.game_engine.next_message()
+        # Verify we got the choice message for FLY, MY PET!
+        assert choice_message is not None
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose NOT to draw the card
@@ -319,7 +321,9 @@ class TestFlyMyPetIntegration(GameEngineTestBase):
         self.play_character(pet_character, player=self.player1)
         self.play_character(attacker, player=self.player2)
         
-        # Set up for challenge
+        # Set up for challenge - ensure dry ink so they can participate in combat
+        pet_character.is_dry = True
+        attacker.is_dry = True
         pet_character.exerted = True
         attacker.exerted = False
         
@@ -327,21 +331,24 @@ class TestFlyMyPetIntegration(GameEngineTestBase):
         
         # Challenge to banish pet
         challenge_move = ChallengeMove(attacker, pet_character)
-        challenge_message = self.game_engine.next_message(challenge_move)
+        self.game_engine.next_message(challenge_move)
         
-        # Process combat
-        combat_message = self.game_engine.next_message()
+        # Process all effects until we get a choice or action required
+        choice_message = None
+        while True:
+            msg = self.game_engine.next_message()
+            if msg.type == MessageType.CHOICE_REQUIRED:
+                choice_message = msg
+                break
+            elif msg.type == MessageType.ACTION_REQUIRED:
+                # If we get ACTION_REQUIRED, the test failed - pet should trigger choice
+                pytest.fail(f"Expected CHOICE_REQUIRED but got ACTION_REQUIRED. Pet banishment might not have triggered FLY, MY PET!")
         
         # Verify banishment
         assert pet_character not in self.player1.characters_in_play
         
-        # Get trigger message
-        trigger_message = self.game_engine.next_message()
-        # Check that message has event data about the ability trigger
-        assert trigger_message.event_data is not None or trigger_message.step is not None
-        
         # Should still get choice message even with empty deck
-        choice_message = self.game_engine.next_message()
+        assert choice_message is not None
         assert choice_message.type == MessageType.CHOICE_REQUIRED
         
         # Choose to draw (but nothing will happen)
@@ -380,7 +387,10 @@ class TestFlyMyPetIntegration(GameEngineTestBase):
         self.play_character(other_character, player=self.player1)
         self.play_character(attacker, player=self.player2)
         
-        # Set up for challenge
+        # Set up for challenge - ensure dry ink so they can participate in combat
+        pet_character.is_dry = True
+        other_character.is_dry = True
+        attacker.is_dry = True
         other_character.exerted = True  # Make other character challengeable
         pet_character.exerted = False   # Pet is safe (ready)
         attacker.exerted = False
@@ -392,10 +402,16 @@ class TestFlyMyPetIntegration(GameEngineTestBase):
         
         # Challenge the other character (not the pet)
         challenge_move = ChallengeMove(attacker, other_character)
-        challenge_message = self.game_engine.next_message(challenge_move)
+        self.game_engine.next_message(challenge_move)
         
-        # Process combat
-        combat_message = self.game_engine.next_message()
+        # Process all effects until we get ACTION_REQUIRED (no choice should happen)
+        while True:
+            msg = self.game_engine.next_message()
+            if msg.type == MessageType.ACTION_REQUIRED:
+                break
+            elif msg.type == MessageType.CHOICE_REQUIRED:
+                # If we get a choice, FLY MY PET incorrectly triggered
+                pytest.fail(f"FLY, MY PET! should not trigger when other characters are banished")
         
         # Verify other character was banished but pet remains
         assert other_character not in self.player1.characters_in_play

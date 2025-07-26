@@ -2,12 +2,6 @@
 
 from typing import Dict, Any, Tuple, Optional, List, Union
 from collections import deque
-from enum import Enum
-
-# NOTE: ExecutionMode stub for compatibility after step system removal
-class ExecutionMode(Enum):
-    MANUAL = "manual"
-    PAUSE_ON_INPUT = "pause_on_input"
 from ..models.game.game_state import GameState, Phase
 from ..models.cards.character_card import CharacterCard
 from ..models.cards.action_card import ActionCard
@@ -15,12 +9,9 @@ from ..models.cards.item_card import ItemCard
 from ..models.cards.base_card import Card
 from .move_validator import MoveValidator
 from .event_system import GameEventManager, GameEvent, EventContext
-from .damage_calculator import DamageCalculator, DamageType
 from .action_result import ActionResult, ActionResultType
 from .choice_system import GameChoiceManager, ChoiceContext
 # NOTE: StepProgressionEngine and related classes removed in Phase 4
-from .input_system import InputManager, PlayerInput, AbilityInputBuilder
-from .state_serializer import SnapshotManager
 from .game_messages import (
     GameMessage, MessageType, ActionRequiredMessage, ChoiceRequiredMessage, 
     StepExecutedMessage, GameOverMessage, LegalAction
@@ -30,7 +21,6 @@ from .action_queue import ActionQueue, ActionPriority, QueuedAction
 from .action_executor import ActionExecutor
 from .execution_engine import ExecutionEngine
 from .message_engine import MessageEngine
-from .choice_engine import ChoiceEngine
 from ..models.abilities.composable.conditional_effects import ActivationZone
 from .game_event_types import GameEventType
 
@@ -46,13 +36,12 @@ def create_event_data(event: GameEvent, **context) -> Dict[str, Any]:
 class GameEngine:
     """Executes game actions and manages state transitions with step-by-step support."""
     
-    def __init__(self, game_state: GameState, execution_mode: ExecutionMode):
+    def __init__(self, game_state: GameState):
         self.game_state = game_state
         
         # Core managers (unchanged)
         self.validator = MoveValidator(game_state)
         self.event_manager = GameEventManager(game_state)
-        self.damage_calculator = DamageCalculator(game_state)
         self.choice_manager = GameChoiceManager()
         
         # Link managers to game state for ability access
@@ -66,19 +55,15 @@ class GameEngine:
         # Three specialized engines
         self.execution_engine = ExecutionEngine(
             game_state, self.validator, self.event_manager, 
-            self.damage_calculator, self.choice_manager, execution_mode
+            self.choice_manager
         )
         self.message_engine = MessageEngine(
             game_state, self.choice_manager, self.validator, self.execution_engine
         )
-        self.choice_engine = ChoiceEngine(game_state, self.choice_manager, self.execution_engine)
         
         # Give event_manager access to action_queue for universal action_queue fix
         self.event_manager.execution_engine = self.execution_engine
         
-        # Legacy components for compatibility
-        self.input_manager = InputManager()
-        self.snapshot_manager = SnapshotManager()
         
         # Set up integration
         self._setup_input_handlers()
@@ -240,41 +225,7 @@ class GameEngine:
         return result
     
     
-    def advance_step(self):
-        """DEPRECATED: Step system removed in Phase 4."""
-        raise NotImplementedError("Step system removed in Phase 4")
     
-    def provide_input_for_current_step(self, input_data: Any):
-        """DEPRECATED: Step system removed in Phase 4."""
-        raise NotImplementedError("Step system removed in Phase 4")
-    
-    def get_current_step(self):
-        """DEPRECATED: Step system removed in Phase 4."""
-        raise NotImplementedError("Step system removed in Phase 4")
-    
-    def get_step_queue_status(self) -> Dict[str, Any]:
-        """DEPRECATED: Step system removed in Phase 4."""
-        raise NotImplementedError("Step system removed in Phase 4")
-    
-    def pause_execution(self) -> None:
-        """DEPRECATED: Step system removed in Phase 4."""
-        raise NotImplementedError("Step system removed in Phase 4")
-    
-    def resume_execution(self) -> None:
-        """DEPRECATED: Step system removed in Phase 4."""
-        raise NotImplementedError("Step system removed in Phase 4")
-    
-    def clear_step_queue(self) -> None:
-        """DEPRECATED: Step system removed in Phase 4."""
-        raise NotImplementedError("Step system removed in Phase 4")
-    
-    def set_execution_mode(self, mode) -> None:
-        """DEPRECATED: Step system removed in Phase 4."""
-        raise NotImplementedError("Step system removed in Phase 4")
-    
-    def register_player_input_provider(self, player_id: str, provider) -> None:
-        """Register an input provider for a player."""
-        self.input_manager.register_input_provider(player_id, provider)
     
     def force_evaluate_conditional_effects(self) -> None:
         """Force evaluation of all conditional effects - delegates to ExecutionEngine."""
@@ -534,11 +485,7 @@ class GameEngine:
         old_player_index = (self.game_state.current_player_index - 1) % len(self.game_state.players)
         ending_player = self.game_state.players[old_player_index]
         
-        # Clear temporary bonuses from all characters belonging to the ending player
-        for character in ending_player.characters_in_play:
-            expired_effects = character.clear_temporary_bonuses(self.game_state)
-            
-            # Note: Expired effects will be handled by the new on-demand message generation
+        # Temporary abilities are now handled by the event system via TURN_ENDS events
     
     
     def _get_legal_actions(self) -> List[LegalAction]:
