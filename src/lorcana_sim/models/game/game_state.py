@@ -104,32 +104,44 @@ class GameState:
         return self._game_state_checker.get_game_result(self)
     
     
-    def advance_phase(self) -> None:
-        """Advance to the next phase."""
-        self._phase_management.advance_phase(self)
+    def advance_phase(self) -> List[Any]:
+        """Advance to the next phase.
+        
+        Returns:
+            List of effects to be queued by the calling system.
+        """
+        return self._phase_management.advance_phase(self)
     
-    def end_turn(self) -> None:
-        """End current player's turn and start next player's turn."""
-        self._phase_management.end_turn(self)
+    def end_turn(self) -> List[Any]:
+        """End current player's turn and start next player's turn.
+        
+        Returns:
+            List of effects to be queued by the calling system.
+        """
+        return self._phase_management.end_turn(self)
     
-    def ready_step(self) -> List[Dict[str, Any]]:
+    def ready_step(self) -> List[Any]:
         """Execute the ready step (ready all cards and start turn).
         
         Returns:
-            List of event data for items that were readied.
+            List of effects to be queued by the calling system.
         """
         return self._phase_management.ready_step(self)
     
     
-    def set_step(self) -> None:
-        """Execute the set step (resolve start-of-turn effects)."""
-        self._phase_management.set_step(self)
+    def set_step(self) -> List[Any]:
+        """Execute the set step (resolve start-of-turn effects).
+        
+        Returns:
+            List of effects to be queued by the calling system.
+        """
+        return self._phase_management.set_step(self)
     
-    def draw_step(self) -> List[Dict[str, Any]]:
+    def draw_step(self) -> List[Any]:
         """Execute the draw step (draw a card).
         
         Returns:
-            List of event data for draw events that occurred.
+            List of effects to be queued by the calling system.
         """
         return self._phase_management.draw_step(self)
     
@@ -151,9 +163,6 @@ class GameState:
         """Notify zone manager of card movement and return any events generated."""
         return self._zone_management.notify_card_zone_change(card, from_zone_name, to_zone_name, self)
     
-    def evaluate_conditional_effects(self) -> List[Dict]:
-        """Evaluate all conditional effects and return any events generated."""
-        return self._zone_management.evaluate_conditional_effects(self)
     
     # Cost Modification Methods
     @property

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from ..models.cards.action_card import ActionCard
     # NOTE: StepProgressionEngine removed in Phase 4
 
-from ..models.abilities.composable.conditional_effects import ActivationZone
+from ..models.abilities.composable.activation_zones import ActivationZone
 from ..utils.logging_config import get_game_logger
 
 logger = get_game_logger(__name__)
@@ -61,12 +61,23 @@ class GameEvent(Enum):
     DRAW_STEP = "draw_step"
     MAIN_PHASE_BEGINS = "main_phase_begins"
     
+    # Phase transition events
+    SET_PHASE_BEGINS = "set_phase_begins"
+    DRAW_PHASE_BEGINS = "draw_phase_begins" 
+    PLAY_PHASE_BEGINS = "play_phase_begins"
+    PHASE_TRANSITION = "phase_transition"
+    
     # Resource events
     CARD_DRAWN = "card_drawn"
     CARD_DISCARDED = "card_discarded"
     INK_PLAYED = "ink_played"
     INK_READIED = "ink_readied"
     LORE_GAINED = "lore_gained"
+    
+    # Draw system events
+    DRAW_ATTEMPT = "draw_attempt"
+    DRAW_MODIFIED = "draw_modified"
+    DRAW_PREVENTED = "draw_prevented"
     
     # Item events
     ITEM_PLAYED = "item_played"
@@ -112,6 +123,15 @@ class GameEvent(Enum):
     DAMAGE_REMOVED = "damage_removed"
     DECK_LOOKED_AT = "deck_looked_at"
     CONDITIONAL_EFFECT_APPLIED = "conditional_effect_applied"
+    
+    # State management events
+    PROPERTY_REMOVED = "property_removed"
+    TURN_STATE_RESET = "turn_state_reset"
+    AUTOMATIC_EFFECT_TRIGGERED = "automatic_effect_triggered"
+    
+    # New effect-specific events
+    READYING_PREVENTED = "readying_prevented"
+    COST_MODIFIER_APPLIED = "cost_modifier_applied"
 
 
 @dataclass

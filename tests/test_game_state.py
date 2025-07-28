@@ -101,6 +101,14 @@ def game_state(players_with_cards):
 class TestGameState:
     """Test GameState functionality."""
     
+    def _advance_phase_and_process(self, game_state):
+        """Helper to advance phase and process the returned effects."""
+        effects = game_state.advance_phase()
+        if effects:
+            for effect in effects:
+                context = {'game_state': game_state}
+                effect.apply(game_state, context)
+    
     def test_game_state_creation(self, players_with_cards):
         """Test creating a valid game state."""
         game_state = GameState(players=players_with_cards)
@@ -145,19 +153,19 @@ class TestGameState:
         assert game_state.current_phase == Phase.READY
         
         # Advance to SET
-        game_state.advance_phase()
+        self._advance_phase_and_process(game_state)
         assert game_state.current_phase == Phase.SET
         
         # Advance to DRAW
-        game_state.advance_phase()
+        self._advance_phase_and_process(game_state)
         assert game_state.current_phase == Phase.DRAW
         
         # Advance to PLAY
-        game_state.advance_phase()
+        self._advance_phase_and_process(game_state)
         assert game_state.current_phase == Phase.PLAY
         
         # Advance should end turn and go back to READY for next player
-        game_state.advance_phase()
+        self._advance_phase_and_process(game_state)
         assert game_state.current_phase == Phase.READY
         assert game_state.current_player_index == 1
         assert game_state.turn_number == 1  # Still turn 1 until we cycle back to player 1
@@ -165,19 +173,19 @@ class TestGameState:
     def test_turn_advancement(self, game_state):
         """Test turn number advancement."""
         # Complete player 1's turn
-        game_state.advance_phase()  # READY -> SET
-        game_state.advance_phase()  # SET -> DRAW
-        game_state.advance_phase()  # DRAW -> PLAY
-        game_state.advance_phase()  # PLAY -> end turn, switch to player 2
+        self._advance_phase_and_process(game_state)  # READY -> SET
+        self._advance_phase_and_process(game_state)  # SET -> DRAW
+        self._advance_phase_and_process(game_state)  # DRAW -> PLAY
+        self._advance_phase_and_process(game_state)  # PLAY -> end turn, switch to player 2
         
         assert game_state.current_player_index == 1
         assert game_state.turn_number == 1
         
         # Complete player 2's turn
-        game_state.advance_phase()  # READY -> SET
-        game_state.advance_phase()  # SET -> DRAW
-        game_state.advance_phase()  # DRAW -> PLAY
-        game_state.advance_phase()  # PLAY -> end turn, switch to player 1
+        self._advance_phase_and_process(game_state)  # READY -> SET
+        self._advance_phase_and_process(game_state)  # SET -> DRAW
+        self._advance_phase_and_process(game_state)  # DRAW -> PLAY
+        self._advance_phase_and_process(game_state)  # PLAY -> end turn, switch to player 1
         
         assert game_state.current_player_index == 0
         assert game_state.turn_number == 2  # Now turn 2

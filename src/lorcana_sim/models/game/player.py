@@ -180,9 +180,13 @@ class Player:
         """Ready all exerted characters (start of turn).
         
         Note: Ink cards are readied separately using ReadyInk effect.
+        Note: Uses ReadyCharacter effects for consistency with new effect-based architecture.
         """
+        from ..abilities.composable.effects import ReadyCharacter
         for character in self.characters_in_play:
-            character.ready()
+            if character.exerted:  # Only apply effect to exerted characters
+                ready_effect = ReadyCharacter(character)
+                ready_effect.apply(character, {'reason': 'ready_step'})
     
     def get_ready_characters(self) -> List[CharacterCard]:
         """Get all ready (unexerted) characters."""

@@ -21,7 +21,7 @@ from .action_queue import ActionQueue, ActionPriority, QueuedAction
 from .action_executor import ActionExecutor
 from .execution_engine import ExecutionEngine
 from .message_engine import MessageEngine
-from ..models.abilities.composable.conditional_effects import ActivationZone
+from ..models.abilities.composable.activation_zones import ActivationZone
 from .game_event_types import GameEventType
 
 
@@ -227,10 +227,6 @@ class GameEngine:
     
     
     
-    def force_evaluate_conditional_effects(self) -> None:
-        """Force evaluation of all conditional effects - delegates to ExecutionEngine."""
-        events = self.execution_engine.force_evaluate_conditional_effects()
-        # Note: Events will be handled by on-demand message generation in new architecture
     
     def trigger_event_with_choices_and_queue(self, event_context: EventContext) -> List[str]:
         """Trigger an event with choice manager and action queue included in the context."""
@@ -511,18 +507,4 @@ class GameEngine:
         # NOTE: Input handlers simplified after step system removal
         pass
     
-    def _evaluate_conditional_effects_before_step(self) -> None:
-        """Evaluate conditional effects before a step is executed - delegates to ExecutionEngine."""
-        events = self.execution_engine._evaluate_conditional_effects_before_step()
-        # Note: Events will be handled by on-demand message generation in new architecture
-    
-    def _evaluate_conditional_effects_on_turn_change(self) -> None:
-        """Evaluate conditional effects when turn changes - delegates to ExecutionEngine."""
-        events = self.execution_engine._evaluate_conditional_effects_on_turn_change()
-        # Note: Events will be handled by on-demand message generation in new architecture
-    
-    def _evaluate_conditional_effects_on_phase_change(self) -> None:
-        """Evaluate conditional effects when phase changes - delegates to ExecutionEngine."""
-        events = self.execution_engine._evaluate_conditional_effects_on_phase_change()
-        # Note: Events will be handled by on-demand message generation in new architecture
     

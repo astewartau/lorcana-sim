@@ -195,6 +195,50 @@ class ConditionalEffect(Effect):
         return f"if condition then {self.effect}{else_str}"
 
 
+class StatefulConditionalEffect(Effect):
+    """Conditional effect that tracks state to avoid redundant applications."""
+    
+    def __init__(self, 
+                 condition: Callable[[Any, Dict], bool], 
+                 true_effect: Effect,
+                 false_effect: Effect,
+                 state_key: str):
+        self.condition = condition
+        self.true_effect = true_effect
+        self.false_effect = false_effect
+        self.state_key = state_key
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        should_be_active = self.condition(target, context)
+        current_state = context.get(f'conditional_state_{self.state_key}', None)
+        
+        # Only apply effects if state changed
+        if should_be_active and current_state != 'active':
+            context[f'conditional_state_{self.state_key}'] = 'active'
+            return self.true_effect.apply(target, context)
+        elif not should_be_active and current_state != 'inactive':
+            context[f'conditional_state_{self.state_key}'] = 'inactive'
+            return self.false_effect.apply(target, context)
+        
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        """Get events from stateful conditional effect."""
+        should_be_active = self.condition(target, context)
+        current_state = context.get(f'conditional_state_{self.state_key}', None)
+        
+        # Only return events if state changed
+        if should_be_active and current_state != 'active':
+            return self.true_effect.get_events(target, context, result)
+        elif not should_be_active and current_state != 'inactive':
+            return self.false_effect.get_events(target, context, result)
+        
+        return []
+    
+    def __str__(self) -> str:
+        return f"stateful conditional: {self.true_effect} vs {self.false_effect}"
+
+
 # =============================================================================
 # TEMPORARY ABILITY INFRASTRUCTURE FOR AUTO-EXPIRING ABILITIES
 # =============================================================================
@@ -218,7 +262,7 @@ class TemporaryAbility:
         self._registered = False
         
         # Zone validation for compatibility with ComposableAbility interface
-        from .conditional_effects import ActivationZone
+        from .activation_zones import ActivationZone
         self.activation_zones = {ActivationZone.PLAY}  # Default to play only
         
         # Create listeners for compatibility with GameEventManager
@@ -860,6 +904,35 @@ class GrantProperty(Effect):
     
     def __str__(self) -> str:
         return f"grant {self.property_name}"
+
+
+class RemoveProperty(Effect):
+    """Remove a property from target."""
+    
+    def __init__(self, property_name: str):
+        self.property_name = property_name
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        if hasattr(target, 'metadata') and self.property_name in target.metadata:
+            del target.metadata[self.property_name]
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        return [{
+            'type': GameEvent.PROPERTY_REMOVED,
+            'target': target,
+            'source': context.get('source') or context.get('ability_owner'),
+            'player': target.controller if hasattr(target, 'controller') else context.get('player'),
+            'additional_data': {
+                'property_name': self.property_name,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
+    def __str__(self) -> str:
+        return f"remove {self.property_name}"
 
 
 class TargetedEffect(Effect):
@@ -1575,27 +1648,83 @@ class PhaseProgressionEffect(Effect):
         # Get the game state
         game_state = context.get('game_state')
         
-        if game_state and hasattr(game_state, 'advance_phase'):
+        if game_state:
             # Store previous phase for event generation
             self._previous_phase = getattr(game_state, 'current_phase', None)
             self._player = getattr(game_state, 'current_player', None)
             
-            # Pure phase transition only - no ready step logic
-            game_state.advance_phase()
+            # Get phase management effects but don't call advance_phase() to avoid recursion
+            # Instead, get the next phase manually and set it directly
+            from ...game.game_state import Phase
+            current_phase = game_state.current_phase
             
-            # Store new phase for event generation
-            self._new_phase = getattr(game_state, 'current_phase', None)
+            next_phase = None
+            if current_phase == Phase.READY:
+                next_phase = Phase.SET
+            elif current_phase == Phase.SET:
+                next_phase = Phase.DRAW
+            elif current_phase == Phase.DRAW:
+                next_phase = Phase.PLAY
+            elif current_phase == Phase.PLAY:
+                # End turn - transition to next player's READY phase
+                # First end the current turn
+                game_state.end_turn()  # This switches players and resets to READY phase
+                next_phase = Phase.READY
+                self._player = game_state.current_player  # Update to new player
+            
+            if next_phase:
+                game_state.current_phase = next_phase
+                self._new_phase = next_phase
+            else:
+                self._new_phase = self._previous_phase
         
         return target
     
     def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
-        """Get phase progression events for this effect - pure transition only."""
+        """Get phase progression events for this effect."""
         events = []
         
         # Import here to avoid circular imports
         from ....engine.event_system import GameEvent
+        from ...game.game_state import Phase
         
-        # Add only phase transition event
+        # Check if this was a turn transition (PLAY -> READY with new player)
+        if (self._previous_phase == Phase.PLAY and 
+            self._new_phase == Phase.READY and 
+            self._player):
+            
+            # Get game state to determine who the previous player was
+            game_state = context.get('game_state')
+            if game_state:
+                # Find the previous player (the other player)
+                prev_player = None
+                for player in game_state.players:
+                    if player != self._player:
+                        prev_player = player
+                        break
+                
+                # Generate TURN_ENDS event for previous player
+                if prev_player:
+                    events.append({
+                        'type': GameEvent.TURN_ENDS,
+                        'player': prev_player,
+                        'source': context.get('source'),
+                        'additional_data': {
+                            'turn_number': game_state.turn_number - 1
+                        }
+                    })
+                
+                # Generate TURN_BEGINS event for new player
+                events.append({
+                    'type': GameEvent.TURN_BEGINS,
+                    'player': self._player,
+                    'source': context.get('source'),
+                    'additional_data': {
+                        'turn_number': game_state.turn_number
+                    }
+                })
+        
+        # Add phase transition event
         if self._player and self._new_phase:
             # Map phase names to events
             phase_events = {
@@ -1937,14 +2066,27 @@ class CostModification(Effect):
 class ReadyCharacter(Effect):
     """Ready (un-exert) a character."""
     
+    def __init__(self, character: Any = None):
+        """Initialize ReadyCharacter effect.
+        
+        Args:
+            character: Specific character to ready. If None, uses target from apply() method.
+        """
+        self.character = character
+    
     def apply(self, target: Any, context: Dict[str, Any]) -> Any:
-        if hasattr(target, 'exerted'):
-            target.exerted = False
+        # Use specific character if provided, otherwise use target
+        char_to_ready = self.character if self.character is not None else target
+        if hasattr(char_to_ready, 'exerted'):
+            char_to_ready.exerted = False
         return target
     
     def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
         """Get events for readying character."""
-        if not hasattr(target, 'controller'):
+        # Use specific character if provided, otherwise use target
+        char_to_ready = self.character if self.character is not None else target
+        
+        if not hasattr(char_to_ready, 'controller'):
             return []
         
         # Import here to avoid circular imports
@@ -1952,11 +2094,11 @@ class ReadyCharacter(Effect):
         
         return [{
             'type': GameEvent.CHARACTER_READIED,
-            'target': target,
+            'target': char_to_ready,
             'source': context.get('source') or context.get('ability_owner'),
-            'player': target.controller,
+            'player': char_to_ready.controller,
             'additional_data': {
-                'character_name': target.name if hasattr(target, 'name') else 'Unknown Character',
+                'character_name': char_to_ready.name if hasattr(char_to_ready, 'name') else 'Unknown Character',
                 'ability_name': context.get('ability_name', 'Unknown')
             }
         }]
@@ -2654,6 +2796,176 @@ class ChoiceGenerationEffect(Effect):
         return f"generate choice for {self.ability_name}"
 
 
+
+
+class ResetTurnState(Effect):
+    """Reset turn state via effect system."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        game_state = context.get('game_state')
+        if game_state:
+            # Reset turn state properties
+            game_state.ink_played_this_turn = False
+            game_state.card_drawn_this_turn = False
+            game_state.actions_this_turn.clear()
+            game_state.characters_acted_this_turn.clear()
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        return [{
+            'type': GameEvent.TURN_STATE_RESET,
+            'target': target,
+            'player': target,
+            'additional_data': {'reason': 'turn_transition'}
+        }]
+    
+    def __str__(self) -> str:
+        return "reset turn state"
+
+
+class TriggerPhaseTransition(Effect):
+    """Trigger phase transition with proper event generation."""
+    
+    def __init__(self, from_phase, to_phase):
+        self.from_phase = from_phase
+        self.to_phase = to_phase
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        game_state = context.get('game_state')
+        if game_state:
+            game_state.current_phase = self.to_phase
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        events = [
+            {
+                'type': GameEvent.PHASE_TRANSITION,
+                'target': context.get('game_state'),
+                'additional_data': {
+                    'from_phase': self.from_phase.value,
+                    'to_phase': self.to_phase.value
+                }
+            }
+        ]
+        
+        # Add specific phase begin event if it exists
+        phase_begin_event_name = f'{self.to_phase.value.upper()}_BEGINS'
+        try:
+            phase_begin_event = getattr(GameEvent, phase_begin_event_name)
+            events.append({
+                'type': phase_begin_event,
+                'target': context.get('game_state'),
+                'additional_data': {'phase': self.to_phase.value}
+            })
+        except AttributeError:
+            # Phase begin event doesn't exist, that's ok
+            pass
+        
+        return events
+    
+    def __str__(self) -> str:
+        return f"transition from {self.from_phase.value} to {self.to_phase.value}"
+
+
+class ReadyInk(Effect):
+    """Ready all ink cards in a player's inkwell."""
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        player = target
+        if hasattr(player, 'inkwell'):
+            for ink_card in player.inkwell:
+                if hasattr(ink_card, 'exerted'):
+                    ink_card.exerted = False
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        return [{
+            'type': GameEvent.INK_READIED,
+            'target': target,
+            'player': target,
+            'additional_data': {
+                'ink_count': len(getattr(target, 'inkwell', [])),
+                'reason': 'ready_step'
+            }
+        }]
+    
+    def __str__(self) -> str:
+        return "ready all ink"
+
+
+class DrawAttemptEffect(Effect):
+    """Initiate a draw attempt (can be modified/prevented by abilities)."""
+    
+    def __init__(self, amount: int = 1, reason: str = "draw_phase"):
+        self.amount = amount
+        self.reason = reason
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Generate DRAW_ATTEMPT event first
+        # This allows abilities to modify or prevent the draw
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        return [{
+            'type': GameEvent.DRAW_ATTEMPT,
+            'target': target,
+            'player': target,
+            'additional_data': {
+                'amount': self.amount,
+                'reason': self.reason,
+                'can_be_modified': True
+            }
+        }]
+    
+    def __str__(self) -> str:
+        return f"attempt to draw {self.amount} card{'s' if self.amount != 1 else ''}"
+
+
+class ModifyDrawEffect(Effect):
+    """Modify an ongoing draw (for replacement effects)."""
+    
+    def __init__(self, new_amount: Optional[int] = None, replacement_effect: Optional[Effect] = None):
+        self.new_amount = new_amount
+        self.replacement_effect = replacement_effect
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Modify the draw context
+        if self.new_amount is not None:
+            context['modified_draw_amount'] = self.new_amount
+        if self.replacement_effect:
+            context['replacement_effect'] = self.replacement_effect
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        # Import here to avoid circular imports
+        from ....engine.event_system import GameEvent
+        return [{
+            'type': GameEvent.DRAW_MODIFIED,
+            'target': target,
+            'player': target,
+            'additional_data': {
+                'original_amount': context.get('original_draw_amount'),
+                'new_amount': self.new_amount,
+                'has_replacement': self.replacement_effect is not None
+            }
+        }]
+    
+    def __str__(self) -> str:
+        if self.new_amount is not None:
+            return f"modify draw to {self.new_amount} cards"
+        elif self.replacement_effect:
+            return f"replace draw with {self.replacement_effect}"
+        return "modify draw"
+
+
 class NoOpEffect:
     """Effect that does nothing - used for placeholder abilities."""
     
@@ -2667,3 +2979,274 @@ class NoOpEffect:
     
     def __str__(self) -> str:
         return "no effect"
+
+
+class ModifyStat(Effect):
+    """Modify a stat (strength, willpower, cost, etc.) on target."""
+    
+    def __init__(self, stat_name: str, modifier: int, duration_type: str = "permanent"):
+        self.stat_name = stat_name
+        self.modifier = modifier
+        self.duration_type = duration_type  # "permanent", "until_end_of_turn", "while_condition"
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Apply stat modification
+        if hasattr(target, self.stat_name):
+            current_value = getattr(target, self.stat_name)
+            new_value = current_value + self.modifier
+            setattr(target, self.stat_name, new_value)
+        elif hasattr(target, 'metadata'):
+            # Store as metadata if direct attribute doesn't exist
+            stat_modifier_key = f'{self.stat_name}_modifier'
+            current_modifier = target.metadata.get(stat_modifier_key, 0)
+            target.metadata[stat_modifier_key] = current_modifier + self.modifier
+        
+        # If temporary, register with timing system
+        if self.duration_type != "permanent":
+            timing_component = context.get('turn_timing')
+            if timing_component:
+                # Create reverse effect for cleanup
+                reverse_effect = ModifyStat(self.stat_name, -self.modifier, "permanent")
+                timing_component.register_temporary_effect(
+                    reverse_effect, 
+                    self.duration_type, 
+                    1 if self.duration_type == "until_end_of_turn" else None
+                )
+        
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        from ....engine.event_system import GameEvent
+        return [{
+            'type': GameEvent.STAT_MODIFIED,
+            'target': target,
+            'source': context.get('source'),
+            'additional_data': {
+                'stat_name': self.stat_name,
+                'modifier': self.modifier,
+                'duration': self.duration_type,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
+    def __str__(self) -> str:
+        sign = "+" if self.modifier >= 0 else ""
+        duration = f" ({self.duration_type})" if self.duration_type != "permanent" else ""
+        return f"{sign}{self.modifier} {self.stat_name}{duration}"
+
+
+class TemporaryEffect(Effect):
+    """Wrapper for effects that should expire after a duration."""
+    
+    def __init__(self, wrapped_effect: Effect, duration_type: str, duration_value: int = 1):
+        self.wrapped_effect = wrapped_effect
+        self.duration_type = duration_type  # "turns", "until_end_of_turn", "phases"
+        self.duration_value = duration_value
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Apply the wrapped effect
+        result = self.wrapped_effect.apply(target, context)
+        
+        # Register for automatic removal
+        timing_component = context.get('turn_timing')
+        if timing_component:
+            # Create cleanup effect
+            if hasattr(self.wrapped_effect, 'create_reverse_effect'):
+                cleanup_effect = self.wrapped_effect.create_reverse_effect()
+            else:
+                # Default cleanup: try to reverse common effects
+                cleanup_effect = self._create_default_cleanup(target, context)
+            
+            if cleanup_effect:
+                timing_component.register_temporary_effect(
+                    cleanup_effect,
+                    self.duration_type,
+                    self.duration_value
+                )
+        
+        return result
+    
+    def _create_default_cleanup(self, target: Any, context: Dict[str, Any]) -> Optional[Effect]:
+        """Create a default cleanup effect based on the wrapped effect type."""
+        if isinstance(self.wrapped_effect, GrantProperty):
+            return RemoveProperty(self.wrapped_effect.property_name)
+        elif isinstance(self.wrapped_effect, ModifyStat):
+            return ModifyStat(
+                self.wrapped_effect.stat_name, 
+                -self.wrapped_effect.modifier,
+                "permanent"
+            )
+        return None
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        # Forward events from wrapped effect
+        events = self.wrapped_effect.get_events(target, context, result)
+        
+        # Add duration info to events
+        for event in events:
+            event['additional_data'] = event.get('additional_data', {})
+            event['additional_data']['duration_type'] = self.duration_type
+            event['additional_data']['duration_value'] = self.duration_value
+        
+        return events
+    
+    def __str__(self) -> str:
+        return f"{self.wrapped_effect} (until {self.duration_type})"
+
+
+class PreventReadying(Effect):
+    """Prevent characters from readying during ready step."""
+    
+    def __init__(self, target_selector: Optional[Callable] = None, condition: Optional[Callable] = None):
+        self.target_selector = target_selector  # Function to select which characters to prevent
+        self.condition = condition  # Additional condition to check
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Grant property that prevents readying
+        if not hasattr(target, 'metadata'):
+            target.metadata = {}
+        target.metadata['prevent_readying'] = True
+        
+        # Store the condition if provided
+        if self.condition:
+            target.metadata['readying_condition'] = self.condition
+        
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        from ....engine.event_system import GameEvent
+        return [{
+            'type': GameEvent.READYING_PREVENTED,
+            'target': target,
+            'source': context.get('source'),
+            'additional_data': {
+                'has_condition': self.condition is not None,
+                'ability_name': context.get('ability_name', 'Unknown')
+            }
+        }]
+    
+    def __str__(self) -> str:
+        return "prevent readying"
+
+
+class DynamicCostModification(Effect):
+    """Modify the cost of playing cards based on dynamic conditions."""
+    
+    def __init__(self, cost_modifier: Union[int, Callable], condition: Callable[[Any, Dict], bool], applies_to: str = "self"):
+        self.cost_modifier = cost_modifier  # Can be int or function that returns int
+        self.condition = condition  # Function that evaluates when modifier applies
+        self.applies_to = applies_to  # "self", "all_cards", specific card types
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Calculate the actual modifier value if it's a function
+        if callable(self.cost_modifier):
+            modifier_value = self.cost_modifier(target, context)
+        else:
+            modifier_value = self.cost_modifier
+            
+        # Register cost modifier with game state
+        game_state = context.get('game_state')
+        if game_state and hasattr(game_state, 'cost_modifiers'):
+            modifier_info = {
+                'source': target,
+                'modifier': modifier_value,
+                'condition': self.condition,
+                'applies_to': self.applies_to,
+                'dynamic_calculator': self.cost_modifier if callable(self.cost_modifier) else None
+            }
+            game_state.cost_modifiers.append(modifier_info)
+        elif hasattr(target, 'metadata'):
+            # Store on target as fallback
+            if 'cost_modifiers' not in target.metadata:
+                target.metadata['cost_modifiers'] = []
+            target.metadata['cost_modifiers'].append({
+                'modifier': modifier_value,
+                'condition': self.condition,
+                'applies_to': self.applies_to,
+                'dynamic_calculator': self.cost_modifier if callable(self.cost_modifier) else None
+            })
+        
+        return target
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        from ....engine.event_system import GameEvent
+        # Calculate modifier value for event reporting
+        if callable(self.cost_modifier):
+            modifier_value = self.cost_modifier(target, context)
+        else:
+            modifier_value = self.cost_modifier
+            
+        return [{
+            'type': GameEvent.COST_MODIFIER_APPLIED,
+            'target': target,
+            'source': context.get('source'),
+            'additional_data': {
+                'cost_modifier': modifier_value,
+                'applies_to': self.applies_to,
+                'ability_name': context.get('ability_name', 'Unknown'),
+                'is_dynamic': callable(self.cost_modifier)
+            }
+        }]
+    
+    def __str__(self) -> str:
+        if callable(self.cost_modifier):
+            return f"dynamic cost modification ({self.applies_to})"
+        else:
+            sign = "+" if self.cost_modifier >= 0 else ""
+            return f"cost {sign}{self.cost_modifier} ({self.applies_to})"
+
+
+class TemporaryEffectCleanup(Effect):
+    """Clean up a temporary effect that has expired."""
+    
+    def __init__(self, expired_effect: Any):
+        self.expired_effect = expired_effect
+    
+    def apply(self, target: Any, context: Dict[str, Any]) -> Any:
+        # Execute cleanup for the expired effect
+        if hasattr(self.expired_effect, 'cleanup'):
+            # If effect has custom cleanup method
+            self.expired_effect.cleanup(target, context)
+        else:
+            # Default cleanup behavior
+            self._default_cleanup(target, context)
+        
+        return target
+    
+    def _default_cleanup(self, target: Any, context: Dict[str, Any]) -> None:
+        """Default cleanup behavior for common effect types."""
+        if isinstance(self.expired_effect, GrantProperty):
+            # Remove the granted property
+            if hasattr(target, 'metadata') and self.expired_effect.property_name in target.metadata:
+                del target.metadata[self.expired_effect.property_name]
+        
+        elif isinstance(self.expired_effect, ModifyStat):
+            # Reverse the stat modification
+            if hasattr(target, self.expired_effect.stat_name):
+                current_value = getattr(target, self.expired_effect.stat_name)
+                new_value = current_value - self.expired_effect.modifier
+                setattr(target, self.expired_effect.stat_name, new_value)
+            elif hasattr(target, 'metadata'):
+                stat_modifier_key = f'{self.expired_effect.stat_name}_modifier'
+                if stat_modifier_key in target.metadata:
+                    current_modifier = target.metadata[stat_modifier_key]
+                    new_modifier = current_modifier - self.expired_effect.modifier
+                    if new_modifier == 0:
+                        del target.metadata[stat_modifier_key]
+                    else:
+                        target.metadata[stat_modifier_key] = new_modifier
+    
+    def get_events(self, target: Any, context: Dict[str, Any], result: Any) -> List[Dict[str, Any]]:
+        from ....engine.event_system import GameEvent
+        return [{
+            'type': GameEvent.EFFECT_EXPIRED,
+            'target': target,
+            'source': context.get('source'),
+            'additional_data': {
+                'expired_effect': str(self.expired_effect),
+                'reason': context.get('reason', 'duration_expired')
+            }
+        }]
+    
+    def __str__(self) -> str:
+        return f"cleanup expired {self.expired_effect}"

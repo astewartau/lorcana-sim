@@ -66,19 +66,34 @@ class GameEngineTestBase:
     
     def advance_to_play_phase(self):
         """Advance the game to the PLAY phase for the current player."""
-        max_attempts = 10
+        max_attempts = 20
         attempts = 0
         
         while self.game_state.current_phase != Phase.PLAY and attempts < max_attempts:
             try:
-                message = self.game_engine.next_message(PassMove())
-                # Debug: print(f"Phase transition: {self.game_state.current_phase}")
-            except:
+                # Get next message without providing a move first (to process queued effects)
+                message = self.game_engine.next_message()
+                
+                # If we get an action required message, pass to advance phase
+                if message.type == MessageType.ACTION_REQUIRED:
+                    message = self.game_engine.next_message(PassMove())
+                
+                # Process any queued effects until phase changes or action required
+                while True:
+                    try:
+                        next_msg = self.game_engine.next_message()
+                        if next_msg.type == MessageType.ACTION_REQUIRED:
+                            break
+                    except:
+                        break
+                        
+            except Exception as e:
+                # Debug: print(f"Error in phase advancement: {e}")
                 break
             attempts += 1
         
         if attempts >= max_attempts:
-            raise RuntimeError(f"Failed to reach PLAY phase after {max_attempts} attempts")
+            raise RuntimeError(f"Failed to reach PLAY phase after {max_attempts} attempts. Current phase: {self.game_state.current_phase}")
     
     def create_test_character(self, name: str = "Test Character", cost: int = 3, 
                              strength: int = 2, willpower: int = 3, lore: int = 1,

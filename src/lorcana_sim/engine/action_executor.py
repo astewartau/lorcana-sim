@@ -28,6 +28,21 @@ class ActionExecutor:
         self.choice_manager = choice_manager
         self.action_queue = action_queue
     
+    def _process_phase_effects(self, phase_effects: List[Any]) -> None:
+        """Process phase transition effects through the action queue."""
+        if phase_effects and self.action_queue:
+            for effect in phase_effects:
+                self.action_queue.enqueue(
+                    effect=effect,
+                    target=self.game_state,
+                    context={'game_state': self.game_state},
+                    priority=ActionPriority.IMMEDIATE
+                )
+            # Process the phase transition immediately
+            while self.action_queue.has_pending_actions():
+                result = self.action_queue.process_next_action(apply_effect=True)
+                if not result:
+                    break
     
     def execute_action(self, action: str, parameters: Dict[str, Any]) -> ActionResult:
         """Execute a game action and return the result."""
@@ -431,7 +446,8 @@ class ActionExecutor:
             readied_items = self.game_state.ready_step()
             
             # Advance to SET phase
-            self.game_state.advance_phase()
+            phase_effects = self.game_state.advance_phase()
+            self._process_phase_effects(phase_effects)
             
             # Trigger SET_PHASE event
             phase_context = EventContext(
@@ -459,7 +475,8 @@ class ActionExecutor:
             self.game_state.set_step()
             
             # Advance to DRAW phase
-            self.game_state.advance_phase()
+            phase_effects = self.game_state.advance_phase()
+            self._process_phase_effects(phase_effects)
             
             # Trigger DRAW_PHASE event
             phase_context = EventContext(
@@ -533,7 +550,8 @@ class ActionExecutor:
                 self.game_state.first_turn_draw_skipped = True
             
             # Advance to PLAY phase
-            self.game_state.advance_phase()
+            phase_effects = self.game_state.advance_phase()
+            self._process_phase_effects(phase_effects)
             
             # Trigger PLAY_PHASE event
             phase_context = EventContext(
@@ -572,7 +590,8 @@ class ActionExecutor:
             self.event_manager.trigger_event(turn_end_context)
             
             # Advance phase (which will call end_turn)
-            self.game_state.advance_phase()
+            phase_effects = self.game_state.advance_phase()
+            self._process_phase_effects(phase_effects)
             
             # Trigger TURN_BEGINS event for new player
             new_player = self.game_state.current_player

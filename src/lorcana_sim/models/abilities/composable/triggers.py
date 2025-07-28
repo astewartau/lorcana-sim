@@ -86,6 +86,11 @@ def when_any_enters_play() -> Callable[[EventContext], bool]:
     return when_event(GameEvent.CHARACTER_ENTERS_PLAY)
 
 
+def when_any_leaves_play() -> Callable[[EventContext], bool]:
+    """Trigger when any character leaves play."""
+    return when_event(GameEvent.CHARACTER_LEAVES_PLAY)
+
+
 def when_leaves_play(character: Any) -> Callable[[EventContext], bool]:
     """Trigger when this specific character leaves play."""
     return when_event(GameEvent.CHARACTER_LEAVES_PLAY,

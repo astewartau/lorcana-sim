@@ -61,14 +61,11 @@ class TestTakePointIntegration(BaseNamedAbilityTest):
         self.player1.characters_in_play.extend([take_point_char, damaged_char])
         
         # Simulate damaged character taking damage
-        event_context = EventContext(
+        self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
             source=damaged_char,
-            player=self.player1,
-            game_state=self.game_state
+            player=self.player1
         )
-        
-        self.event_manager.trigger_event(event_context)
         
         # TAKE POINT should provide +2 strength bonus due to damaged character
         take_point_ability = take_point_char.composable_abilities[0]
@@ -111,14 +108,11 @@ class TestTakePointIntegration(BaseNamedAbilityTest):
         # Character takes damage
         target_char.damage = 1
         
-        event_context = EventContext(
+        self.trigger_event_with_context(
             event_type=GameEvent.CHARACTER_TAKES_DAMAGE,
             source=target_char,
-            player=self.player1,
-            game_state=self.game_state
+            player=self.player1
         )
-        
-        self.event_manager.trigger_event(event_context)
         
         # TAKE POINT should respond to damage events
         take_point_ability = take_point_char.composable_abilities[0]

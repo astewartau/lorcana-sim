@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from .effects import Effect
 from .target_selectors import TargetSelector
-from .conditional_effects import ActivationZone
+from .activation_zones import ActivationZone
 from ....engine.event_system import GameEvent, EventContext
 
 

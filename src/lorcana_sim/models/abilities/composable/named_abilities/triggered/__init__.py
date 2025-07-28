@@ -16,7 +16,6 @@ from .heavily_armed import *
 from .i_win import *
 from .parting_gift import *
 from .play_rough import *
-from .quick_reflexes import *
 from .recurring_gust import *
 from .thats_better import *
 from .untold_treasure import *
@@ -48,7 +47,6 @@ __all__ = [
     'create_i_win',
     'create_parting_gift',
     'create_play_rough',
-    'create_quick_reflexes',
     'create_recurring_gust',
     'create_thats_better',
     'create_untold_treasure',

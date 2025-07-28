@@ -7,7 +7,7 @@ sys.path.append('/home/ashley/repos/lorcana/lorcana-sim/src')
 
 from tests.named_abilities.triggered.test_grasping_trunk import TestGraspingTrunkIntegration
 from lorcana_sim.engine.event_system import get_card_current_zone
-from lorcana_sim.models.abilities.composable.conditional_effects import ActivationZone
+from lorcana_sim.models.abilities.composable.activation_zones import ActivationZone
 
 def debug_zone_validation():
     """Debug zone validation for quest abilities."""

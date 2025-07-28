@@ -9,7 +9,6 @@ if TYPE_CHECKING:
     from ..game.game_state import GameState
     from ...engine.event_system import GameEventManager
     from ..abilities.composable import ComposableAbility
-    from ..abilities.composable.conditional_effects import ConditionalEffect
     from ..game.player import Player
 
 
@@ -40,7 +39,6 @@ class CharacterCard(Card):
     
     # Composable Ability Integration
     composable_abilities: List['ComposableAbility'] = field(default_factory=list)
-    conditional_effects: List['ConditionalEffect'] = field(default_factory=list)
     controller: Optional['Player'] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     
@@ -120,8 +118,10 @@ class CharacterCard(Card):
         self.exerted = True
     
     def ready(self) -> None:
-        """Ready this character."""
-        self.exerted = False
+        """Ready this character using effect-based system."""
+        from ..abilities.composable.effects import ReadyCharacter
+        ready_effect = ReadyCharacter(self)
+        ready_effect.apply(self, {'reason': 'manual_ready'})
     
     
     def has_rush_ability(self) -> bool:
@@ -217,25 +217,61 @@ class CharacterCard(Card):
         """Add a composable ability to this character."""
         self.composable_abilities.append(ability)
     
-    # Conditional Effect Management Methods
-    def add_conditional_effect(self, effect: 'ConditionalEffect') -> None:
-        """Add a conditional effect to this character."""
-        self.conditional_effects.append(effect)
     
-    def remove_conditional_effect(self, effect_id: str) -> Optional['ConditionalEffect']:
-        """Remove a conditional effect by ID and return it if found."""
-        for i, effect in enumerate(self.conditional_effects):
-            if effect.effect_id == effect_id:
-                return self.conditional_effects.pop(i)
-        return None
-    
-    def get_conditional_effect(self, effect_id: str) -> Optional['ConditionalEffect']:
-        """Get a conditional effect by ID."""
-        for effect in self.conditional_effects:
-            if effect.effect_id == effect_id:
-                return effect
-        return None
-    
-    def get_active_conditional_effects(self) -> List['ConditionalEffect']:
-        """Get all currently active conditional effects."""
-        return [effect for effect in self.conditional_effects if effect.is_active]
+    def get_active_abilities(self, game_state: Optional['GameState'] = None) -> List[str]:
+        """Get all currently active abilities including conditionally-granted ones.
+        
+        Args:
+            game_state: Current game state for context-aware abilities
+            
+        Returns:
+            List of ability names currently active on this character
+        """
+        # Start with permanent abilities
+        abilities = []
+        
+        # Add named abilities
+        for ability in self.composable_abilities:
+            if hasattr(ability, 'name') and ability.name:
+                abilities.append(ability.name)
+        
+        # Add conditionally-granted keyword abilities based on metadata
+        keyword_properties = {
+            'has_evasive': 'Evasive',
+            'has_rush': 'Rush',
+            'has_ward': 'Ward',
+            'has_bodyguard': 'Bodyguard',
+            'has_challenger': 'Challenger',
+            'has_resist': lambda: f"Resist {self.metadata.get('resist_value', 1)}",
+            'has_support': 'Support'
+        }
+        
+        for property_key, ability_name in keyword_properties.items():
+            if self.metadata.get(property_key, False):
+                # Handle dynamic ability names (like Resist X)
+                if callable(ability_name):
+                    abilities.append(ability_name())
+                else:
+                    abilities.append(ability_name)
+        
+        return abilities
+
+    def get_display_info(self, game_state: Optional['GameState'] = None) -> Dict[str, Any]:
+        """Get comprehensive display information for this character.
+        
+        Returns dict with:
+        - name: Character name
+        - stats: Current strength/willpower
+        - abilities: List of active abilities
+        - status: Exerted, damage, etc.
+        """
+        return {
+            'name': self.full_name,
+            'stats': f"{self.strength}/{self.willpower}",
+            'abilities': self.get_active_abilities(game_state),
+            'status': {
+                'exerted': self.exerted,
+                'damage': self.damage,
+                'dry': self.is_dry
+            }
+        }

@@ -20,7 +20,7 @@ from ..models.abilities.composable.effects import (
 )
 from .action_queue import ActionPriority
 from .game_messages import StepExecutedMessage, MessageType
-from ..models.abilities.composable.conditional_effects import ActivationZone
+from ..models.abilities.composable.activation_zones import ActivationZone
 
 
 class ExecutionEngine:
@@ -43,8 +43,6 @@ class ExecutionEngine:
         )
         # NOTE: current_action_steps removed in Phase 4
         
-        # Conditional effect evaluation
-        self._condition_evaluator = None
     
     def execute_action(self, action: str, parameters: Dict) -> ActionResult:
         """Execute action directly and return result."""
@@ -193,36 +191,12 @@ class ExecutionEngine:
         return self.action_queue.has_pending_actions()
 
     
-    def evaluate_conditional_effects(self, trigger_context) -> List[Dict]:
-        """Evaluate and trigger conditional effects."""
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        if self._condition_evaluator is None:
-            return []
-            
-        return self._condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            trigger_context
-        )
     
     def can_execute_action(self, action: str, parameters: Dict) -> bool:
         """Check if action can be executed."""
         is_valid, _ = self.validator.validate_action(action, parameters)
         return is_valid
     
-    def force_evaluate_conditional_effects(self) -> None:
-        """Force evaluation of all conditional effects."""
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        if self._condition_evaluator is None:
-            return
-        
-        # Evaluate effects for current game state
-        events = self._condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            EvaluationTrigger.FORCED_EVALUATION
-        )
-        return events
     
     # Private methods moved from GameEngine
     
@@ -257,21 +231,6 @@ class ExecutionEngine:
         
     
     
-    def _evaluate_conditional_effects_before_step(self) -> List[Dict]:
-        """Evaluate conditional effects before a step is executed."""
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        events = []
-        
-        # Evaluate conditional effects (reactive conditions are handled separately in MessageEngine)
-        if self._condition_evaluator is not None:
-            conditional_events = self._condition_evaluator.evaluate_all_conditions(
-                self.game_state, 
-                EvaluationTrigger.STEP_EXECUTED
-            )
-            events.extend(conditional_events)
-        
-        return events
     
     def _check_reactive_conditions(self) -> List[Dict]:
         """Check for reactive conditions that should trigger after game state changes.
@@ -330,29 +289,6 @@ class ExecutionEngine:
         
         return events
     
-    def _evaluate_conditional_effects_on_turn_change(self) -> List[Dict]:
-        """Evaluate conditional effects when turn changes."""
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        if self._condition_evaluator is None:
-            return []
-        
-        return self._condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            EvaluationTrigger.TURN_CHANGE
-        )
-    
-    def _evaluate_conditional_effects_on_phase_change(self) -> List[Dict]:
-        """Evaluate conditional effects when phase changes."""
-        from ..models.abilities.composable.condition_evaluator import EvaluationTrigger
-        
-        if self._condition_evaluator is None:
-            return []
-        
-        return self._condition_evaluator.evaluate_all_conditions(
-            self.game_state, 
-            EvaluationTrigger.PHASE_CHANGE
-        )
     
     def _resolve_choice_direct(self, choice_id: str, option: str) -> ActionResult:
         """Resolve a choice directly."""
@@ -367,10 +303,3 @@ class ExecutionEngine:
             return ActionResult.failure_result("progress", f"Failed to resolve choice {choice_id}")
     
     
-    @property
-    def condition_evaluator(self):
-        """Lazy initialization of condition evaluator."""
-        if self._condition_evaluator is None:
-            from ..models.abilities.composable.condition_evaluator import ConditionEvaluator
-            self._condition_evaluator = ConditionEvaluator()
-        return self._condition_evaluator

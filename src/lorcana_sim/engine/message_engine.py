@@ -91,10 +91,7 @@ class MessageEngine:
             if reactive_message:
                 return reactive_message
         
-        # 4. Evaluate conditional effects and queue them (don't execute)  
-        # Only evaluate if game state has actually changed since last evaluation
-        if self.execution_engine and self._should_evaluate_conditional_effects():
-            self._evaluate_and_queue_conditional_effects()
+        # 4. Legacy conditional effects evaluation removed - now handled by modern event-driven system
         
         # 4.5. Queue default action if no actions pending and phase requires default behavior
         if self.execution_engine and not self.execution_engine.action_queue.has_pending_actions():
@@ -282,51 +279,7 @@ class MessageEngine:
         if self.execution_engine:
             reactive_events = self.execution_engine._check_reactive_conditions()
     
-    def _should_evaluate_conditional_effects(self) -> bool:
-        """Check if conditional effects should be evaluated."""
-        current_turn = self.game_state.turn_number
-        current_phase = self.game_state.current_phase.value
-        
-        # Don't evaluate more than once per call
-        if self.conditional_evaluations_this_call >= self.max_conditional_evals_per_call:
-            return False
-        
-        # Only evaluate if turn or phase has changed
-        if (current_turn != self.last_conditional_eval_turn or 
-            current_phase != self.last_conditional_eval_phase):
-            return True
-        
-        return False
     
-    def _evaluate_and_queue_conditional_effects(self) -> None:
-        """Evaluate conditional effects and queue them (don't execute)."""
-        if self.execution_engine:
-            # Update tracking
-            self.last_conditional_eval_turn = self.game_state.turn_number
-            self.last_conditional_eval_phase = self.game_state.current_phase.value
-            self.conditional_evaluations_this_call += 1
-            
-            conditional_events = self.execution_engine._evaluate_conditional_effects_before_step()
-            self._queue_conditional_effects(conditional_events)
-    
-    def _queue_conditional_effects(self, conditional_events: List[Dict]) -> None:
-        """Queue conditional effect events as effects with HIGH priority."""
-        if not conditional_events:
-            return
-            
-        from ..models.abilities.composable.effects import ConditionalEffectWrapper
-        from .action_queue import ActionPriority
-        
-        for event in conditional_events:
-            # Create a wrapper effect for the conditional event
-            effect = ConditionalEffectWrapper(event)
-            self.execution_engine.action_queue.enqueue(
-                effect=effect,
-                target=self.game_state.current_player,
-                context={'game_state': self.game_state, 'conditional_event': event},
-                priority=ActionPriority.HIGH,  # HIGH priority as specified in Phase 5
-                source_description=f"Conditional effect: {event.get('ability_name', 'Unknown')}"
-            )
     
     def _queue_default_action_if_needed(self) -> None:
         """Queue default actions for phases that require automatic behavior."""
@@ -344,13 +297,12 @@ class MessageEngine:
         # Note: PLAY phase should use the original logic that checks for legal actions
 
     def _queue_ready_phase_effects(self) -> None:
-        """Queue individual ready phase effects instead of bundled PhaseProgressionEffect."""
+        """Queue ready phase effects using modernized phase management."""
         from ..models.abilities.composable.effects import PhaseProgressionEffect
         from .action_queue import ActionPriority
         from .event_system import GameEvent, EventContext
         
         # CRITICAL: Trigger READY_PHASE event first so abilities can trigger
-        # This must happen before the ready step mechanics
         ready_phase_context = EventContext(
             event_type=GameEvent.READY_PHASE,
             player=self.game_state.current_player,
@@ -364,37 +316,18 @@ class MessageEngine:
             if event_manager:
                 event_manager.trigger_event(ready_phase_context)
         
-        # Get ready step events from phase management (this also executes the ready logic)
-        ready_events = self.game_state._phase_management.ready_step(self.game_state)
+        # Get ready step effects from modernized phase management
+        ready_effects = self.game_state._phase_management.ready_step(self.game_state)
         
-        # Create custom effects for each ready event that simply return the pre-computed data
-        for event_data in ready_events:
-            event_type = event_data['event']
-            context = event_data['context']
-            
-            if event_type.value == 'ink_readied':
-                # Create a custom effect that reports the ink ready event
-                ink_count = context.get('ink_count', 1)
-                effect = ReadyInkReportEffect(ink_count)
-                self.execution_engine.action_queue.enqueue(
-                    effect=effect,
-                    target=self.game_state.current_player,
-                    context={'game_state': self.game_state, 'ready_event': event_data},
-                    priority=ActionPriority.NORMAL,
-                    source_description=f"Ready {ink_count} ink"
-                )
-            elif event_type.value == 'character_readied':
-                # Create a custom effect that reports the character ready event
-                character_name = context.get('character_name', 'Unknown Character')
-                character = context.get('character')  # Get full character object if available
-                effect = ReadyCharacterReportEffect(character_name, character)
-                self.execution_engine.action_queue.enqueue(
-                    effect=effect,
-                    target=self.game_state.current_player,
-                    context={'game_state': self.game_state, 'ready_event': event_data},
-                    priority=ActionPriority.NORMAL,
-                    source_description=f"Ready character: {character_name}"
-                )
+        # Queue each effect returned by phase management
+        for effect in ready_effects:
+            self.execution_engine.action_queue.enqueue(
+                effect=effect,
+                target=self.game_state.current_player,
+                context={'game_state': self.game_state},
+                priority=ActionPriority.NORMAL,
+                source_description=str(effect)
+            )
         
         # Finally, queue phase transition to SET
         self.execution_engine.action_queue.enqueue(
@@ -420,32 +353,22 @@ class MessageEngine:
         )
 
     def _queue_draw_phase_effects(self) -> None:
-        """Queue individual draw phase effects."""
-        from ..models.abilities.composable.effects import DrawCards, PhaseProgressionEffect
+        """Queue draw phase effects using modernized phase management."""
+        from ..models.abilities.composable.effects import PhaseProgressionEffect
         from .action_queue import ActionPriority
         
-        # Get draw step events from phase management
-        draw_events = self.game_state._phase_management.draw_step(self.game_state)
+        # Get draw step effects from modernized phase management
+        draw_effects = self.game_state._phase_management.draw_step(self.game_state)
         
-        # Queue individual effects for each draw event
-        for event_data in draw_events:
-            event_type = event_data['event']
-            context = event_data['context']
-            
-            if event_type.value == 'card_drawn':
-                if not context.get('draw_failed') and context.get('should_draw'):
-                    # Queue DrawCards effect (only when should_draw is True)
-                    self.execution_engine.action_queue.enqueue(
-                        effect=DrawCards(1),
-                        target=self.game_state.current_player,
-                        context={'game_state': self.game_state},
-                        priority=ActionPriority.NORMAL,
-                        source_description="Draw phase card draw"
-                    )
-            elif event_type.value == 'draw_step':
-                # Skip draw for first turn first player
-                # No effect needed, just log
-                pass
+        # Queue each effect returned by phase management
+        for effect in draw_effects:
+            self.execution_engine.action_queue.enqueue(
+                effect=effect,
+                target=self.game_state.current_player,
+                context={'game_state': self.game_state},
+                priority=ActionPriority.NORMAL,
+                source_description=str(effect)
+            )
         
         # Finally, queue phase transition to PLAY
         self.execution_engine.action_queue.enqueue(

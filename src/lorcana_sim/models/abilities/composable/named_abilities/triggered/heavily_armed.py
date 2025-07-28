@@ -14,10 +14,13 @@ def create_heavily_armed(character: Any, ability_data: dict):
     
     Implementation: When controller draws a card, this character gains Challenger +1 until end of turn.
     """
+    # Create temporary challenger effect that lasts until end of turn
+    temporary_challenger = ChallengerEffect(1, "until_end_of_turn")
+    
     return quick_ability(
         "HEAVILY ARMED",
         character,
         when_card_drawn(character),  # Pass character instead of character.controller for late binding
         SELF,
-        ChallengerEffect(1, "this_turn")  # Fix: Challenger +1 this turn, not permanent
+        temporary_challenger
     )

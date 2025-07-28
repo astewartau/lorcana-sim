@@ -6,7 +6,7 @@ from ...composable_ability import quick_ability
 from ...effects import DRAW_CARD
 from ...target_selectors import CONTROLLER
 from ...triggers import when_banished
-from ...conditional_effects import ActivationZone
+from ...activation_zones import ActivationZone
 
 
 @register_named_ability("FLY, MY PET!")

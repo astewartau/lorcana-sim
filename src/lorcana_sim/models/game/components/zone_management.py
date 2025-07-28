@@ -38,7 +38,7 @@ class ZoneManagementComponent:
             return []
         
         # Convert zone names to ActivationZone enums
-        from ...abilities.composable.conditional_effects import ActivationZone
+        from ...abilities.composable.activation_zones import ActivationZone
         
         zone_map = {
             'hand': ActivationZone.HAND,
@@ -53,6 +53,3 @@ class ZoneManagementComponent:
         
         return self.zone_manager.handle_zone_transition(card, from_zone, to_zone, game_state)
     
-    def evaluate_conditional_effects(self, game_state: "GameState") -> List[Dict]:
-        """Evaluate all conditional effects and return any events generated."""
-        return self.zone_manager.evaluate_all_effects(game_state)
